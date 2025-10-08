@@ -967,42 +967,36 @@ document.getElementById("btnAssault").addEventListener("click", toggleAssault);
 
 // ------------ Сохранить карту как изображение (исправлено: без сдвигов полигонов) ------------
 
-function saveMapAsImageLeaflet() {
-  if (!imageOverlay || !imageBounds) return alert("Карта не загружена — нечего сохранять!");
+function saveMapAsScreenshot() {
+  if (!imageOverlay) return alert("Карта не загружена — нечего сохранять!");
 
-  // создаем временный map с точно такими же bounds и imageOverlay
-  const tempMapDiv = document.createElement('div');
-  tempMapDiv.style.width = imageBounds[1][1] + 'px';  // ширина картинки
-  tempMapDiv.style.height = imageBounds[1][0] + 'px'; // высота картинки
-  tempMapDiv.style.position = 'absolute';
-  tempMapDiv.style.left = '-9999px'; // вне экрана
-  document.body.appendChild(tempMapDiv);
+  const mapContainer = document.getElementById('map');
 
-  const tempMap = L.map(tempMapDiv, {
-    crs: L.CRS.Simple,
-    zoomControl: false,
-    attributionControl: false
-  });
+  // Скрываем всплывающие окна Leaflet (если есть)
+  const tooltips = mapContainer.querySelectorAll('.leaflet-tooltip');
+  tooltips.forEach(t => t.style.display = 'none');
 
-  // добавляем тот же imageOverlay
-  L.imageOverlay(imageOverlay._url, imageBounds).addTo(tempMap);
-
-  // добавляем маркеры и рисунки в новый map
-  drawnItems.eachLayer(layer => layer.addTo(tempMap));
-  markerList.forEach(m => m.marker.clone().addTo(tempMap));
-  simpleMarkers.forEach(m => m.clone().addTo(tempMap));
-
-  // рендерим leaflet-image
-  leafletImage(tempMap, function(err, canvas) {
-    if (err) return alert("Ошибка leaflet-image: " + err);
+  html2canvas(mapContainer, {
+    backgroundColor: null,
+    useCORS: true,
+    allowTaint: true,
+    scale: 2 // повышаем разрешение
+  }).then(canvas => {
+    // Восстанавливаем tooltips
+    tooltips.forEach(t => t.style.display = '');
 
     const link = document.createElement('a');
-    link.download = currentMapFile ? currentMapFile.replace(/\.[^/.]+$/, '') + '_plan.png' : 'map_plan.png';
-    link.href = canvas.toDataURL("image/png");
+    const fileName = currentMapFile
+      ? currentMapFile.replace(/\.[^/.]+$/, '') + '_plan.png'
+      : 'map_plan.png';
+    link.download = fileName;
+    link.href = canvas.toDataURL('image/png');
     link.click();
-
-    // удаляем временный map
-    tempMap.remove();
-    document.body.removeChild(tempMapDiv);
+  }).catch(err => {
+    console.error("Ошибка при создании скриншота карты:", err);
+    alert("Не удалось сохранить карту как изображение.");
   });
 }
+
+// Привязка к кнопке
+document.getElementById('btnSaveImage').addEventListener('click', saveMapAsScreenshot);
