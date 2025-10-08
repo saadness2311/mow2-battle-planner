@@ -967,41 +967,23 @@ document.getElementById("btnAssault").addEventListener("click", toggleAssault);
 
 // ------------ Сохранить карту как изображение (исправлено: без сдвигов полигонов) ------------
 
-function saveMapAsImage() {
-  if (!imageBounds || !imageOverlay) {
-    return alert("Карта не загружена — нечего сохранять!");
-  }
+function saveMapAsImageLeaflet() {
+  if (!imageOverlay) return alert("Карта не загружена — нечего сохранять!");
 
-  // получаем контейнер карты
-  const mapContainer = document.getElementById('map');
+  // leaflet-image рендерит карту в canvas
+  leafletImage(map, function(err, canvas) {
+    if (err) {
+      console.error("Ошибка leaflet-image:", err);
+      return alert("Ошибка при создании изображения карты.");
+    }
 
-  // вычисляем pixel bounds overlay относительно контейнера
-  const topLeft = map.latLngToContainerPoint(imageBounds[0]);
-  const bottomRight = map.latLngToContainerPoint(imageBounds[1]);
-  const cropX = Math.round(topLeft.x);
-  const cropY = Math.round(topLeft.y);
-  const cropWidth = Math.round(bottomRight.x - topLeft.x);
-  const cropHeight = Math.round(bottomRight.y - topLeft.y);
-
-  html2canvas(mapContainer, {
-    x: cropX,
-    y: cropY,
-    width: cropWidth,
-    height: cropHeight,
-    useCORS: true,
-    allowTaint: true,
-    backgroundColor: null,
-    scale: 2
-  }).then(canvas => {
+    // создаем ссылку и сохраняем
     const link = document.createElement('a');
     link.download = currentMapFile ? currentMapFile.replace(/\.[^/.]+$/, '') + '_plan.png' : 'map_plan.png';
     link.href = canvas.toDataURL("image/png");
     link.click();
-  }).catch(err => {
-    console.error("Ошибка сохранения карты:", err);
-    alert("Ошибка при сохранении изображения. Смотрите консоль.");
   });
 }
 
 // Привязываем к кнопке
-document.getElementById('btnSaveImage').addEventListener('click', saveMapAsImage);
+document.getElementById('btnSaveImage').addEventListener('click', saveMapAsImageLeaflet);
