@@ -968,22 +968,41 @@ document.getElementById("btnAssault").addEventListener("click", toggleAssault);
 // ------------ Сохранить карту как изображение (исправлено: без сдвигов полигонов) ------------
 
 function saveMapAsImageLeaflet() {
-  if (!imageOverlay) return alert("Карта не загружена — нечего сохранять!");
+  if (!imageOverlay || !imageBounds) return alert("Карта не загружена — нечего сохранять!");
 
-  // leaflet-image рендерит карту в canvas
-  leafletImage(map, function(err, canvas) {
-    if (err) {
-      console.error("Ошибка leaflet-image:", err);
-      return alert("Ошибка при создании изображения карты.");
-    }
+  // создаем временный map с точно такими же bounds и imageOverlay
+  const tempMapDiv = document.createElement('div');
+  tempMapDiv.style.width = imageBounds[1][1] + 'px';  // ширина картинки
+  tempMapDiv.style.height = imageBounds[1][0] + 'px'; // высота картинки
+  tempMapDiv.style.position = 'absolute';
+  tempMapDiv.style.left = '-9999px'; // вне экрана
+  document.body.appendChild(tempMapDiv);
 
-    // создаем ссылку и сохраняем
+  const tempMap = L.map(tempMapDiv, {
+    crs: L.CRS.Simple,
+    zoomControl: false,
+    attributionControl: false
+  });
+
+  // добавляем тот же imageOverlay
+  L.imageOverlay(imageOverlay._url, imageBounds).addTo(tempMap);
+
+  // добавляем маркеры и рисунки в новый map
+  drawnItems.eachLayer(layer => layer.addTo(tempMap));
+  markerList.forEach(m => m.marker.clone().addTo(tempMap));
+  simpleMarkers.forEach(m => m.clone().addTo(tempMap));
+
+  // рендерим leaflet-image
+  leafletImage(tempMap, function(err, canvas) {
+    if (err) return alert("Ошибка leaflet-image: " + err);
+
     const link = document.createElement('a');
     link.download = currentMapFile ? currentMapFile.replace(/\.[^/.]+$/, '') + '_plan.png' : 'map_plan.png';
     link.href = canvas.toDataURL("image/png");
     link.click();
+
+    // удаляем временный map
+    tempMap.remove();
+    document.body.removeChild(tempMapDiv);
   });
 }
-
-// Привязываем к кнопке
-document.getElementById('btnSaveImage').addEventListener('click', saveMapAsImageLeaflet);
