@@ -988,46 +988,87 @@ function toggleAssault() {
 document.getElementById("btnAssault").addEventListener("click", toggleAssault);
 
 // ------------ Сохранить карту как изображение (исправлено: без сдвигов полигонов) ------------
-async function saveMapAsImage() {
-  if (typeof leafletImage === 'undefined') {
-    alert("Библиотека leaflet-image не загружена!");
-    return;
+
+// Функция клонирует карту и убирает transform у слоев SVG/Canvas
+function cloneMapForCanvas() {
+  const mapContainer = map.getContainer();
+  const clone = mapContainer.cloneNode(true);
+
+  clone.style.width = mapContainer.offsetWidth + 'px';
+  clone.style.height = mapContainer.offsetHeight + 'px';
+  clone.style.position = 'absolute';
+  clone.style.top = '0';
+  clone.style.left = '0';
+
+  // Убираем CSS-трансформации у всех svg/canvas слоев (чтобы линии/полигоны не съехали)
+  clone.querySelectorAll('svg, canvas').forEach(el => {
+    el.style.transform = 'none';
+    el.style.position = 'absolute';
+    el.style.left = el.offsetLeft + 'px';
+    el.style.top = el.offsetTop + 'px';
+  });
+
+  return clone;
+}
+
+// Основная функция сохранения карты
+async function saveMapAsImageHtml2Canvas() {
+  const mapContainer = map.getContainer();
+  if (!mapContainer) return alert("Элемент карты не найден!");
+
+  // Загружаем html2canvas при необходимости
+  if (typeof html2canvas === 'undefined') {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.body.appendChild(script);
+    });
   }
 
-  // генерируем картинку из карты
-  leafletImage(map, function(err, canvas) {
-    if (err || !canvas) {
-      console.error(err);
-      alert('Ошибка при создании изображения карты');
-      return;
-    }
+  // Немного ждём, чтобы Leaflet успел перерисовать все оверлеи
+  await new Promise(r => setTimeout(r, 100));
 
-    // имя файла с датой
-    const now = new Date();
-    const timestamp = now.toISOString().replace(/[:T]/g, '-').split('.')[0];
-    const filename = `map_snapshot_${timestamp}.png`;
+  const clone = cloneMapForCanvas();
 
-    // создаём Blob для скачивания
-    canvas.toBlob(function(blob) {
+  html2canvas(clone, {
+    useCORS: true,
+    allowTaint: true,
+    backgroundColor: null,
+    scale: 2,
+    logging: false,
+    foreignObjectRendering: false,
+    imageTimeout: 0
+  }).then(canvas => {
+    // --- Скачиваем изображение ---
+    canvas.toBlob(blob => {
       if (!blob) return;
+      const now = new Date();
+      const timestamp = now.toISOString().replace(/[:T]/g, '-').split('.')[0];
+      const filename = `map_snapshot_${timestamp}.png`;
 
-      // сохраняем файл
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
-
-      // копируем в буфер обмена (если доступно)
-      if (navigator.clipboard && window.ClipboardItem) {
-        const item = new ClipboardItem({ "image/png": blob });
-        navigator.clipboard.write([item])
-          .then(() => console.log('✅ Карта скопирована в буфер обмена'))
-          .catch(err => console.warn('Ошибка копирования в буфер:', err));
-      }
     });
+
+    // --- Копируем в буфер обмена (если поддерживается) ---
+    canvas.toBlob(blob => {
+      if (!navigator.clipboard || !window.ClipboardItem) return;
+      const item = new ClipboardItem({ "image/png": blob });
+      navigator.clipboard.write([item])
+        .then(() => console.log('✅ Карта скопирована в буфер обмена'))
+        .catch(err => console.warn('⚠️ Ошибка копирования в буфер:', err));
+    });
+  }).catch(err => {
+    console.error('Ошибка при рендере карты:', err);
+    alert('Не удалось сохранить карту как изображение');
   });
 }
 
-document.getElementById('btnSaveImage').addEventListener('click', saveMapAsImage);
+// Привязка к кнопке
+document.getElementById('btnSaveImage').addEventListener('click', saveMapAsImageHtml2Canvas);
