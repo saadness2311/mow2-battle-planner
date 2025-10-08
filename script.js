@@ -1012,11 +1012,11 @@ function cloneMapForCanvas() {
 }
 
 // Основная функция сохранения карты
-async function saveMapAsImageHtml2Canvas() {
+async function saveLeafletMapAsImage() {
   const mapContainer = map.getContainer();
   if (!mapContainer) return alert("Элемент карты не найден!");
 
-  // Загружаем html2canvas при необходимости
+  // Подключаем html2canvas при необходимости
   if (typeof html2canvas === 'undefined') {
     await new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -1027,23 +1027,35 @@ async function saveMapAsImageHtml2Canvas() {
     });
   }
 
-  // Немного ждём, чтобы Leaflet успел перерисовать все оверлеи
-  await new Promise(r => setTimeout(r, 100));
+  // Клонируем карту
+  const clone = mapContainer.cloneNode(true);
+  clone.style.width = mapContainer.offsetWidth + 'px';
+  clone.style.height = mapContainer.offsetHeight + 'px';
+  clone.style.position = 'absolute';
+  clone.style.top = '0';
+  clone.style.left = '0';
 
-  const clone = cloneMapForCanvas();
+  // Сбрасываем transform у всех svg/canvas слоев
+  clone.querySelectorAll('svg, canvas').forEach(el => {
+    el.style.transform = 'none';
+    el.style.position = 'absolute';
+    el.style.left = el.offsetLeft + 'px';
+    el.style.top = el.offsetTop + 'px';
+  });
 
+  // html2canvas с allowTaint=false и useCORS=true
   html2canvas(clone, {
-    useCORS: true,
-    allowTaint: true,
     backgroundColor: null,
     scale: 2,
+    useCORS: true,
+    allowTaint: false,
     logging: false,
-    foreignObjectRendering: false,
-    imageTimeout: 0
+    imageTimeout: 0,
+    foreignObjectRendering: false
   }).then(canvas => {
-    // --- Скачиваем изображение ---
     canvas.toBlob(blob => {
-      if (!blob) return;
+      if (!blob) return alert("Не удалось создать изображение");
+
       const now = new Date();
       const timestamp = now.toISOString().replace(/[:T]/g, '-').split('.')[0];
       const filename = `map_snapshot_${timestamp}.png`;
@@ -1055,20 +1067,10 @@ async function saveMapAsImageHtml2Canvas() {
       a.click();
       URL.revokeObjectURL(url);
     });
-
-    // --- Копируем в буфер обмена (если поддерживается) ---
-    canvas.toBlob(blob => {
-      if (!navigator.clipboard || !window.ClipboardItem) return;
-      const item = new ClipboardItem({ "image/png": blob });
-      navigator.clipboard.write([item])
-        .then(() => console.log('✅ Карта скопирована в буфер обмена'))
-        .catch(err => console.warn('⚠️ Ошибка копирования в буфер:', err));
-    });
   }).catch(err => {
-    console.error('Ошибка при рендере карты:', err);
-    alert('Не удалось сохранить карту как изображение');
+    console.error(err);
+    alert("Ошибка при создании изображения карты");
   });
 }
 
-// Привязка к кнопке
-document.getElementById('btnSaveImage').addEventListener('click', saveMapAsImageHtml2Canvas);
+document.getElementById('btnSaveImage').addEventListener('click', saveLeafletMapAsImage);
