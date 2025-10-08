@@ -323,53 +323,41 @@ map.addControl(new SimpleSymbols({ position: 'topleft' }));
 
 // === addSimpleSymbol с масштабируемыми иконками ===
 function addSimpleSymbol(type, latlng) {
-  const color = getDrawColor(); // use selected color
+  const color = getDrawColor(); 
   const size = 60;
 
-  let html = '';
-  switch(type) {
-    case 'dot': html = `<div style="color:${color};font-size:${size}px;">●</div>`; break;
-    case 'x': html = `<div style="color:${color};font-size:${size}px;">✖</div>`; break;
-    case 'arrow': html = `<div style="color:${color};font-size:${size}px;">↑</div>`; break;
-    case 'triangle': html = `<div style="color:${color};font-size:${size}px;">▲</div>`; break;
-    case 'diamond': html = `<div style="color:${color};font-size:${size}px;">◆</div>`; break;
-    case 'skull': html = `<div style="color:${color};font-size:${size}px;">☠</div>`; break;
-    case 'cross': html = `<div style="color:${color};font-size:${size}px;">☧</div>`; break;
-    default: html = `<div style="color:${color};font-size:${size}px;">?</div>`;
+  let char = '?';
+  switch(type){
+    case 'dot': char='●'; break;
+    case 'x': char='✖'; break;
+    case 'arrow': char='↑'; break;
+    case 'triangle': char='▲'; break;
+    case 'diamond': char='◆'; break;
+    case 'skull': char='☠'; break;
+    case 'cross': char='☧'; break;
   }
 
   const marker = L.marker(latlng, {
     icon: L.divIcon({
-      html,
+      html: `<div style="color:${color};font-size:${size}px;">${char}</div>`,
       className: 'symbol-marker',
-      iconSize: [size, size],
-      iconAnchor: [size/2, size/2]
+      iconSize: [size,size],
+      iconAnchor: [size/2,size/2]
     }),
     draggable: true
   }).addTo(map);
 
- // === Добавляем подсказку с кратким названием символа ===
-  const match = url.match(/\/(symb\d+)\.png$/);
-  if (match) {
-    const key = match[1];
-    const shortLabel = ICON_LABELS[key]
-      ? ICON_LABELS[key].replace(/пехота|поддержки|оборона|танк(овый)?|самоходн(ая|ый)?|пушка|автомобиль|техника|авиация|отряд/gi, '').trim()
-      : key;
-    marker.bindTooltip(shortLabel, {
-      permanent: false,
-      direction: "top",
-      offset: [0, -20],
-      opacity: 0.9
-    });
-  }
+  // НЕ добавляем tooltip для простых символов
+  marker._simpleType = type; // чтобы при сохранении/загрузке восстановить тип
 
-marker.on('click', () => {
-  if (confirm('Удалить этот символ?')) {
-    map.removeLayer(marker);
-    const idx = simpleMarkers.indexOf(marker);
-    if (idx !== -1) simpleMarkers.splice(idx, 1);
-  }
-});
+  marker.on('click', () => {
+    if(confirm('Удалить этот символ?')){
+      map.removeLayer(marker);
+      const idx = simpleMarkers.indexOf(marker);
+      if(idx!==-1) simpleMarkers.splice(idx,1);
+    }
+  });
+
   return marker;
 }
 
@@ -383,28 +371,23 @@ function addCustomIcon(url, latlng) {
     draggable: true
   }).addTo(map);
 
-  // === Добавляем подсказку с кратким названием символа ===
   try {
-    // Получаем имя файла, например "symb1.png" -> key = "symb1"
     const file = String(url).split('/').pop() || '';
-    const key = file.replace(/\.[^/.]+$/, ''); // убираем расширение
-    const label = (ICON_SHORT[key] || ICON_LABELS[key] || key);
-
-    // Привязываем tooltip (показывается при наведении)
-    marker.bindTooltip(label, {
-      permanent: false,
-      direction: "top",
-      offset: [0, -26],
-      opacity: 0.95,
-      className: 'symb-tooltip' // можно стилизовать в CSS
-    });
-
-    // сохраняем имя символа у маркера (используется при сохранении/удалении)
+    const key = file.replace(/\.[^/.]+$/, '');
     marker._symbName = key;
-  } catch (e) {
-    // ничего критичного, просто пропускаем
-    console.warn('tooltip bind error', e);
-  }
+
+    // --- Только если для символа есть label ---
+    if(ICON_LABELS[key]){
+      const label = ICON_SHORT[key] || ICON_LABELS[key];
+      marker.bindTooltip(label, {
+        permanent: false,
+        direction: "top",
+        offset: [0, -26],
+        opacity: 0.95,
+        className: 'symb-tooltip'
+      });
+    }
+  } catch (e) { console.warn('tooltip bind error', e); }
 
   marker.on('click', () => {
     if (confirm('Удалить этот символ?')) {
@@ -416,7 +399,6 @@ function addCustomIcon(url, latlng) {
 
   return marker;
 }
-
 
 //------------ Заполнение списка карт автоматически ------------
 const mapSelect = $id('mapSelect');
@@ -629,15 +611,21 @@ $id('drawWeight').addEventListener('input', (e)=>{
 });
 
 // ------------ Сохранение плана в JSON ------------
-$id('btnSave').addEventListener('click', ()=>{
-  if(!currentMapFile) {
-    if(!confirm('Карта не загружена. Сохранить план без привязки к файлу карты?')) {
-      return;
-    }
-  }
+// ------------ Сохранение плана в JSON (исправлено) ------------
+function pickLayerOptions(layer){
+  if(!layer || !layer.options) return {};
+  const opts = {};
+  ['color','weight','fillColor','fillOpacity','radius'].forEach(k=>{
+    if(layer.options[k]!==undefined) opts[k] = layer.options[k];
+  });
+  return opts;
+}
 
-  // Сохранение маркеров
-  const markers = markerList.map(m => ({
+$id('btnSave').addEventListener('click', ()=> {
+  if(!currentMapFile && !confirm('Карта не загружена. Сохранить план без карты?')) return;
+
+  // игроки
+  const markers = markerList.map(m=>({
     id: m.id,
     team: m.team,
     playerIndex: m.playerIndex,
@@ -647,204 +635,112 @@ $id('btnSave').addEventListener('click', ()=>{
     latlng: m.marker.getLatLng()
   }));
 
-  // Сохранение простых символов (html + latlng)
-  const simple = simpleMarkers.map(m => {
-    const el = m.getElement ? m.getElement() : null;
-    return {
-      latlng: m.getLatLng(),
-      html: el ? el.innerHTML : null
-    };
+  // простые символы (AddSimpleSymbol + custom)
+  const simple = simpleMarkers.map(m=>{
+    const latlng = m.getLatLng ? m.getLatLng() : {lat:0,lng:0};
+    const type = m._symbName || m._simpleType || null; // type для AddSimpleSymbol
+    const html = m.getElement ? m.getElement().innerHTML : '';
+    return { latlng, type, html };
   });
 
-  // Сохранение рисунков (iterating drawnItems to capture type and options)
+  // рисунки
   const drawings = [];
-  drawnItems.eachLayer(layer => {
-    try {
-      if (layer instanceof L.Polyline && !(layer instanceof L.Polygon)) {
-        drawings.push({
-          type: 'polyline',
-          latlngs: layer.getLatLngs().map(p => ({ lat: p.lat, lng: p.lng })),
-          options: pickLayerOptions(layer)
-        });
-      } else if (layer instanceof L.Polygon) {
-        // polygon may have nested latlngs (array of rings)
+  drawnItems.eachLayer(layer=>{
+    try{
+      if(layer instanceof L.Polyline && !(layer instanceof L.Polygon)){
+        drawings.push({type:'polyline', latlngs: layer.getLatLngs().map(p=>({lat:p.lat,lng:p.lng})), options: pickLayerOptions(layer)});
+      } else if(layer instanceof L.Polygon){
         const rings = layer.getLatLngs();
-        // take outer ring if exists
-        if (Array.isArray(rings) && rings.length > 0) {
-          drawings.push({
-            type: 'polygon',
-            latlngs: rings[0].map(p => ({ lat: p.lat, lng: p.lng })),
-            options: pickLayerOptions(layer)
-          });
-        } else {
-          drawings.push({
-            type: 'polygon',
-            latlngs: layer.getLatLngs().map(p => ({ lat: p.lat, lng: p.lng })),
-            options: pickLayerOptions(layer)
-          });
-        }
-      } else if (layer instanceof L.Circle) {
-        drawings.push({
-          type: 'circle',
-          center: layer.getLatLng(),
-          radius: layer.getRadius(),
-          options: pickLayerOptions(layer)
-        });
-      } else {
-        // fallback to geojson
-        const gj = layer.toGeoJSON ? layer.toGeoJSON() : null;
-        drawings.push({ type: 'geojson', geojson: gj, options: pickLayerOptions(layer) });
+        const latlngs = Array.isArray(rings[0]) ? rings[0].map(p=>({lat:p.lat,lng:p.lng})) : rings.map(p=>({lat:p.lat,lng:p.lng}));
+        drawings.push({type:'polygon', latlngs, options: pickLayerOptions(layer)});
+      } else if(layer instanceof L.Circle){
+        drawings.push({type:'circle', center: layer.getLatLng(), radius: layer.getRadius(), options: pickLayerOptions(layer)});
       }
-    } catch(e){
-      // ignore a layer we can't serialize
-      console.warn('serialize drawing error', e);
-    }
+    } catch(e){console.warn('serialize drawing error', e);}
   });
 
   const plan = {
-    meta: {
-      createdAt: (new Date()).toISOString(),
-      mapFile: currentMapFile || null
-    },
+    meta: { createdAt: new Date().toISOString(), mapFile: currentMapFile || null },
     markers,
     simple,
     drawings,
-    mapState: imageBounds ? { bounds: imageBounds } : null
+    mapState: { center: map.getCenter(), zoom: map.getZoom() }
   };
 
-  const blob = new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
+  const blob = new Blob([JSON.stringify(plan,null,2)], {type:'application/json'});
   const a = document.createElement('a');
-  a.href = url;
-  a.download = 'mow2_plan.json';
+  a.href = URL.createObjectURL(blob);
+  a.download = (currentMapFile||'plan').replace(/\.[^/.]+$/,'')+'_plan.json';
   a.click();
-  URL.revokeObjectURL(url);
+  URL.revokeObjectURL(a.href);
 });
 
-// helper: pick layer options we care about (color, weight, fillColor, fillOpacity)
-function pickLayerOptions(layer){
-  const o = {};
-  if (!layer || !layer.options) return o;
-  const opt = layer.options;
-  if (opt.color) o.color = opt.color;
-  if (opt.weight) o.weight = opt.weight;
-  if (opt.fillColor) o.fillColor = opt.fillColor;
-  if (typeof opt.fillOpacity !== 'undefined') o.fillOpacity = opt.fillOpacity;
-  if (typeof opt.radius !== 'undefined') o.radius = opt.radius;
-  return o;
-}
+// ------------ Загрузка плана из JSON (исправлено) ------------
+function loadPlanData(plan){
+  if(!plan) return;
 
-// === Функция загрузки плана ===
-function loadPlanData(plan) {
-  if (!plan) return;
-
-  // --- 1. Очистка карты ---
+  // очистка
   drawnItems.clearLayers();
-  markerList.forEach(m => {
-    try { map.removeLayer(m.marker); } catch(e){}
-  });
+  markerList.forEach(m=>{ try{ map.removeLayer(m.marker) }catch(e){} });
   markerList = [];
-  simpleMarkers.forEach(m => { try { map.removeLayer(m); } catch(e){} });
+  simpleMarkers.forEach(m=>{ try{ map.removeLayer(m) }catch(e){} });
   simpleMarkers = [];
 
-  // --- 2. Восстановление карты ---
-  const mapFile = plan.meta?.mapFile || "map1.jpg";
-  if (mapSelect) mapSelect.value = mapFile;
+  const mapFile = plan.meta?.mapFile || 'map1.jpg';
+  if(mapSelect) mapSelect.value = mapFile;
 
-  // load map and then restore everything
-  loadMapByFile(mapFile).then(() => {
-    // --- 3. Восстановление маркеров ---
-    if (Array.isArray(plan.markers)) {
-      plan.markers.forEach(m => {
-        const iconUrl = `${ICON_FOLDER}${m.nation}/${m.regimentFile}`;
-        const marker = L.marker([m.latlng.lat, m.latlng.lng], {
-          draggable: true,
-          icon: L.divIcon({
-            html: `<div class="mw2-reg">
-                    <img src="${iconUrl}" onerror="this.src='${PLACEHOLDER_SVG}'; this.style.width='56px'; this.style.height='56px'" 
-                         style="width:56px;height:56px;object-fit:contain;" />
-                    <div class="mw2-label">${escapeHtml(m.nick)}</div>
-                   </div>`,
-            className: "",
-            iconSize: [56, 56 + 18],
-            iconAnchor: [28, 28]
-          })
-        }).addTo(map);
+  loadMapByFile(mapFile).then(()=>{
+    // маркеры игроков
+    (plan.markers||[]).forEach(m=>{
+      const pos = m.latlng || {lat:0,lng:0};
+      const marker = L.marker([pos.lat,pos.lng], { icon:createRegDivIcon(m.nick,m.nation,m.regimentFile,m.team), draggable:true }).addTo(map);
+      markerList.push({...m, marker});
+    });
 
-        markerList.push({
-          id: m.id,
-          team: m.team,
-          playerIndex: m.playerIndex,
-          nick: m.nick,
-          nation: m.nation,
-          regimentFile: m.regimentFile,
-          marker
-        });
-      });
-    }
+    // простые символы
+    // простые символы
+(plan.simple||[]).forEach(s => {
+  const latlng = s.latlng || {lat:0,lng:0};
+  let marker;
 
-    // --- 4. Восстановление простых символов ---
-    if (Array.isArray(plan.simple)) {
-  plan.simple.forEach(s => {
-    try {
-      const lat = s.latlng.lat || (s.latlng[0] && s.latlng[0].lat) || s.lat;
-      const lng = s.latlng.lng || (s.latlng[0] && s.latlng[0].lng) || s.lng;
-      const marker = L.marker([lat, lng], {
-        icon: L.divIcon({ html: s.html || '', className: 'symbol-marker' }),
-        draggable: true
-      }).addTo(map);
+  if(s.type && ICON_NAMES.includes(s.type)){
+    // AddCustomSymbol с сохранённым _symbName
+    marker = addCustomIcon(`assets/symbols/${s.type}.png`, latlng);
+    marker._symbName = s.type;
+  } else {
+    // AddSimpleSymbol (dot, x, arrow, triangle, diamond, skull, cross)
+    marker = L.marker([latlng.lat, latlng.lng], {
+      icon: L.divIcon({
+        html: s.html || '',
+        className: 'symbol-marker'
+      }),
+      draggable: true
+    }).addTo(map);
 
-      // Попробуем достать имя symbX из html (если там есть <img src="...symbN.png">)
-      try {
-        const html = s.html || '';
-        const m = html.match(/\/(symb\d+)\.png/i);
-        if (m) {
-          const key = m[1];
-          const label = (ICON_SHORT[key] || ICON_LABELS[key] || key);
-          marker.bindTooltip(label, {
-            permanent: false,
-            direction: "top",
-            offset: [0, -26],
-            opacity: 0.95,
-            className: 'symb-tooltip'
-          });
-          marker._symbName = key;
-        }
-      } catch(e) {
-        // ignore parsing errors
-      }
+    // сохраняем тип для восстановления при сохранении
+    if(s._simpleType) marker._simpleType = s._simpleType;
+  }
 
-      simpleMarkers.push(marker);
-    } catch(e){}
-  });
-}
+  simpleMarkers.push(marker);
+});
 
-    // --- 5. Восстановление рисунков ---
-    if (Array.isArray(plan.drawings)) {
-      plan.drawings.forEach(d => {
-        try {
-          if (d.type === 'polyline') {
-            const latlngs = d.latlngs.map(p => [p.lat, p.lng]);
-            L.polyline(latlngs, d.options || {}).addTo(drawnItems);
-          } else if (d.type === 'polygon') {
-            const latlngs = d.latlngs.map(p => [p.lat, p.lng]);
-            L.polygon(latlngs, d.options || {}).addTo(drawnItems);
-          } else if (d.type === 'circle') {
-            const center = [d.center.lat, d.center.lng];
-            L.circle(center, { radius: d.radius, ...(d.options || {}) }).addTo(drawnItems);
-          } else if (d.type === 'geojson') {
-            L.geoJSON(d.geojson).eachLayer(layer => drawnItems.addLayer(layer));
-          }
-        } catch(e){
-          console.warn('Ошибка восстановления рисунка:', e);
-        }
-      });
-    }
 
-    alert("✅ План успешно загружен!");
-  }).catch(err => {
-    console.error("Ошибка при загрузке карты для плана:", err);
-    alert("Ошибка при загрузке карты/плана: " + (err.message || err));
+    // рисунки
+    (plan.drawings||[]).forEach(d=>{
+      try{
+        if(d.type==='polyline') L.polyline(d.latlngs.map(p=>[p.lat,p.lng]), d.options||{}).addTo(drawnItems);
+        else if(d.type==='polygon') L.polygon(d.latlngs.map(p=>[p.lat,p.lng]), d.options||{}).addTo(drawnItems);
+        else if(d.type==='circle') L.circle([d.center.lat,d.center.lng], { radius:d.radius, ...(d.options||{}) }).addTo(drawnItems);
+      } catch(e){console.warn('Ошибка восстановления рисунка:',e);}
+    });
+
+    // восстановление позиции карты
+    if(plan.mapState && plan.mapState.center && plan.mapState.zoom) map.setView(plan.mapState.center, plan.mapState.zoom);
+
+    alert('✅ План успешно загружен!');
+  }).catch(err=>{
+    console.error('Ошибка при загрузке карты:', err);
+    alert('Ошибка при загрузке карты/плана: '+(err.message||err));
   });
 }
 
