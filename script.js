@@ -989,88 +989,153 @@ document.getElementById("btnAssault").addEventListener("click", toggleAssault);
 
 // ------------ Сохранить карту как изображение (исправлено: без сдвигов полигонов) ------------
 
-// Функция клонирует карту и убирает transform у слоев SVG/Canvas
-function cloneMapForCanvas() {
-  const mapContainer = map.getContainer();
-  const clone = mapContainer.cloneNode(true);
+// ------------ Инициализация карты ------------
+const map = L.map('map', {
+  crs: L.CRS.Simple,
+  minZoom: -1,
+  maxZoom: 4,
+  zoomSnap: 0.25,
+  zoomDelta: 0.5,
+});
+map.setView([0,0], 0);
 
-  clone.style.width = mapContainer.offsetWidth + 'px';
-  clone.style.height = mapContainer.offsetHeight + 'px';
-  clone.style.position = 'absolute';
-  clone.style.top = '0';
-  clone.style.left = '0';
+const drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
 
-  // Убираем CSS-трансформации у всех svg/canvas слоев (чтобы линии/полигоны не съехали)
-  clone.querySelectorAll('svg, canvas').forEach(el => {
-    el.style.transform = 'none';
-    el.style.position = 'absolute';
-    el.style.left = el.offsetLeft + 'px';
-    el.style.top = el.offsetTop + 'px';
-  });
+// ------------ Контейнеры для маркеров/символов ------------
+let markerList = [];
+let simpleMarkers = [];
 
-  return clone;
+// ------------ Контроль рисования ------------
+const drawControl = new L.Control.Draw({
+  position: 'topleft',
+  draw: { marker:false, polyline:true, polygon:true, rectangle:false, circle:false, circlemarker:false },
+  edit: { featureGroup: drawnItems, remove:true }
+});
+map.addControl(drawControl);
+
+function getDrawColor(){ return document.getElementById('drawColor').value; }
+function getDrawWeight(){ return Number(document.getElementById('drawWeight').value); }
+
+map.on(L.Draw.Event.CREATED, function(e){
+  const layer = e.layer;
+  if(layer.setStyle){
+    const style = { color: getDrawColor(), weight: getDrawWeight() };
+    if(layer instanceof L.Polygon){
+      style.fillColor = getDrawColor();
+      style.fillOpacity = 0.15;
+    }
+    layer.setStyle(style);
+  }
+  drawnItems.addLayer(layer);
+});
+
+// ------------ Маркеры игроков ------------
+const ICON_FOLDER = "assets/";
+const PLACEHOLDER_SVG = 'data:image/svg+xml;utf8,'+encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128">
+     <rect width="100%" height="100%" fill="#444"/>
+     <text x="50%" y="54%" font-size="18" fill="#fff" text-anchor="middle" font-family="Arial">no</text>
+     <text x="50%" y="70%" font-size="12" fill="#ddd" text-anchor="middle" font-family="Arial">image</text>
+   </svg>`);
+
+function generateMarkerId(team, idx){ return `${team}-${idx}`; }
+
+function createRegDivIcon(nick, nation, regimentFile, team){
+  const iconUrl = `${ICON_FOLDER}${nation}/${regimentFile}`;
+  const size = 56;
+  const teamClass = team==='blue'?'blue-marker':team==='red'?'red-marker':'';
+  const html = `<div class="mw2-reg ${teamClass}">
+    <img src="${iconUrl}" onerror="this.src='${PLACEHOLDER_SVG}'; this.style.width='56px'; this.style.height='56px'" 
+         style="width:${size}px;height:${size}px;object-fit:contain;" />
+    <div class="mw2-label">${nick}</div>
+  </div>`;
+  return L.divIcon({ html, className:'', iconSize:[size, size+18], iconAnchor:[size/2, size/2] });
 }
 
-// Основная функция сохранения карты
-async function saveLeafletMapAsImage() {
-  const mapContainer = map.getContainer();
-  if (!mapContainer) return alert("Элемент карты не найден!");
+function placeMarker(nick, nation, regimentFile, team, playerIndex){
+  const id = generateMarkerId(team, playerIndex);
+  const existingIndex = markerList.findIndex(m=>m.id===id);
+  if(existingIndex!==-1){ map.removeLayer(markerList[existingIndex].marker); markerList.splice(existingIndex,1); }
+  const pos = map.getCenter();
+  const icon = createRegDivIcon(nick,nation,regimentFile,team);
+  const marker = L.marker(pos,{icon, draggable:true}).addTo(map);
+  markerList.push({id,team,playerIndex,nick,nation,regimentFile,marker});
+}
 
-  // Подключаем html2canvas при необходимости
-  if (typeof html2canvas === 'undefined') {
-    await new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-      script.onload = resolve;
-      script.onerror = reject;
-      document.body.appendChild(script);
-    });
-  }
+// ------------ ImageOverlay (карта) ------------
+const MAP_FOLDER = "assets/maps/";
+let imageOverlay = null;
+let imageBounds = null;
+let currentMapFile = null;
 
-  // Клонируем карту
-  const clone = mapContainer.cloneNode(true);
-  clone.style.width = mapContainer.offsetWidth + 'px';
-  clone.style.height = mapContainer.offsetHeight + 'px';
-  clone.style.position = 'absolute';
-  clone.style.top = '0';
-  clone.style.left = '0';
-
-  // Сбрасываем transform у всех svg/canvas слоев
-  clone.querySelectorAll('svg, canvas').forEach(el => {
-    el.style.transform = 'none';
-    el.style.position = 'absolute';
-    el.style.left = el.offsetLeft + 'px';
-    el.style.top = el.offsetTop + 'px';
+function loadMapByFile(fileName){
+  return new Promise((resolve,reject)=>{
+    if(imageOverlay){ try{ map.removeLayer(imageOverlay); } catch(e){} imageOverlay=null; imageBounds=null; currentMapFile=null; }
+    const img = new Image();
+    img.onload = function(){
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      imageBounds = [[0,0],[h,w]];
+      imageOverlay = L.imageOverlay(MAP_FOLDER+fileName,imageBounds).addTo(map);
+      imageOverlay.bringToBack();
+      map.fitBounds(imageBounds);
+      currentMapFile = fileName;
+      resolve();
+    };
+    img.onerror = ()=>reject(new Error('Не удалось загрузить карту: '+fileName));
+    img.src = MAP_FOLDER+fileName;
   });
+}
 
-  // html2canvas с allowTaint=false и useCORS=true
-  html2canvas(clone, {
-    backgroundColor: null,
-    scale: 2,
-    useCORS: true,
-    allowTaint: false,
-    logging: false,
-    imageTimeout: 0,
-    foreignObjectRendering: false
-  }).then(canvas => {
-    canvas.toBlob(blob => {
-      if (!blob) return alert("Не удалось создать изображение");
+document.getElementById('btnLoadMap').addEventListener('click',()=>{
+  const sel = document.getElementById('mapSelect').value;
+  if(!sel) return alert('Выберите карту');
+  loadMapByFile(sel).catch(err=>alert(err.message));
+});
 
-      const now = new Date();
-      const timestamp = now.toISOString().replace(/[:T]/g, '-').split('.')[0];
-      const filename = `map_snapshot_${timestamp}.png`;
+document.getElementById('btnResetMap').addEventListener('click',()=>{
+  if(imageOverlay) map.removeLayer(imageOverlay);
+  imageOverlay=null; imageBounds=null; currentMapFile=null;
+  map.setView([0,0],0);
+});
 
+// ------------ Сохранение карты как PNG (leaflet-image) ------------
+document.getElementById('btnSaveImage').addEventListener('click', () => {
+  if(!map) return alert("Карта не инициализирована");
+  leafletImage(map, function(err, canvas){
+    if(err) return alert("Ошибка при создании изображения карты: "+err);
+    canvas.toBlob(blob=>{
+      if(!blob) return alert("Не удалось создать изображение");
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
+      a.href=url;
+      const now = new Date();
+      const timestamp = now.toISOString().replace(/[:T]/g,'-').split('.')[0];
+      a.download = `map_snapshot_${timestamp}.png`;
       a.click();
       URL.revokeObjectURL(url);
     });
-  }).catch(err => {
-    console.error(err);
-    alert("Ошибка при создании изображения карты");
   });
-}
+});
 
-document.getElementById('btnSaveImage').addEventListener('click', saveLeafletMapAsImage);
+// ------------ Сохранение плана в JSON ------------
+document.getElementById('btnSave').addEventListener('click', ()=>{
+  const markers = markerList.map(m=>({id:m.id,team:m.team,playerIndex:m.playerIndex,nick:m.nick,nation:m.nation,regimentFile:m.regimentFile,latlng:m.marker.getLatLng()}));
+  const drawings=[];
+  drawnItems.eachLayer(l=>{
+    if(l instanceof L.Polyline && !(l instanceof L.Polygon)){
+      drawings.push({type:'polyline',latlngs:l.getLatLngs(),options:{color:l.options.color,weight:l.options.weight}});
+    }else if(l instanceof L.Polygon){
+      drawings.push({type:'polygon',latlngs:l.getLatLngs(),options:{color:l.options.color,weight:l.options.weight,fillColor:l.options.fillColor,fillOpacity:l.options.fillOpacity}});
+    }
+  });
+  const plan={meta:{createdAt:(new Date()).toISOString(),mapFile:currentMapFile},markers,drawings};
+  const blob = new Blob([JSON.stringify(plan,null,2)],{type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url;
+  a.download='mow2_plan.json';
+  a.click();
+  URL.revokeObjectURL(url);
+});
