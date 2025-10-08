@@ -1,0 +1,236 @@
+:root{
+  --sidebar-w: 360px;            /* ширина сайдбара */
+  --panel-bg: rgba(6,8,10,0.85); /* фон сайдбара */
+  --accent: #ffcc33;
+}
+
+/* ----------------- Общие сбросы ----------------- */
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;padding:0}
+body{
+  font-family: Inter, Arial, Helvetica, sans-serif;
+  color:#fff;
+  /* фон: картинка + тёмный оверлей для контраста */
+  background-image:
+    linear-gradient(rgba(6,8,10,0.65), rgba(6,8,10,0.65)),
+    url('assets/ui/bg.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+/* ----------------- Лэйаут ----------------- */
+.app{
+  display:flex;
+  height:100vh;
+  align-items:stretch;
+  overflow:hidden;
+}
+
+/* Сайдбар — фиксированная ширина; занимает «реальное» место (не абсолют) */
+.sidebar{
+  flex: 0 0 var(--sidebar-w); /* фиксированная ширина в flex-контейнере */
+  width: var(--sidebar-w);
+  padding:16px;
+  background: var(--panel-bg);
+  overflow:auto;
+  z-index: 1002;                 /* выше по Z, чтобы элементы сайдбара всегда видны */
+  box-shadow: 2px 0 18px rgba(0,0,0,0.6);
+  border-right: 1px solid rgba(255,255,255,0.03);
+}
+
+/* Заголовок — явно видимый */
+.sidebar h1{
+  margin:0 0 12px 0;
+  font-size:20px;
+  font-weight:700;
+  letter-spacing:0.6px;
+  color:#ffd479;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+}
+
+/* Отступы секций */
+.sidebar section{ margin-bottom:16px; }
+.sidebar label{ display:block; font-size:13px; margin-bottom:6px; color:#dfe6e9; }
+.note { font-size:12px; opacity:0.9; margin-top:8px; color:#d7d7d7; }
+
+/* ----------------- Игроки / формы ----------------- */
+.team h3{ margin:8px 0 6px 0; font-size:15px; }
+
+/* Строка игрока — гибкая, позволяет перенос на маленьких экранах */
+.player-row{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  margin-bottom:8px;
+  flex-wrap:wrap;          /* допускаем перенос, чтобы кнопки не выходили за границы */
+  background: rgba(255,255,255,0.02);
+  padding:6px;
+  border-radius:6px;
+}
+
+/* Текстовые поля и селекты, аккуратный стиль */
+.player-row input[type="text"]{
+  flex:1;
+  min-width:120px;
+  padding:6px 8px;
+  border-radius:6px;
+  border:0;
+  background:#0f1012;
+  color:#fff;
+  outline: 1px solid rgba(255,255,255,0.03);
+}
+
+.player-row select{
+  padding:6px 8px;
+  border-radius:6px;
+  border:0;
+  background:#0f1012;
+  color:#fff;
+  outline: 1px solid rgba(255,255,255,0.03);
+  min-width:110px;
+}
+
+/* Кнопки — делаем ощутимыми и видимыми, не обрезаем */
+.player-row button{
+  padding:6px 10px;
+  border-radius:6px;
+  border:0;
+  background: linear-gradient(180deg,#2b6cff,#1f4fe6);
+  color:#fff;
+  cursor:pointer;
+  white-space:nowrap;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+/* когда контент сайдбара длинный — не давим карту */
+.sidebar::-webkit-scrollbar{ height:8px; width:8px; }
+.sidebar::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.06); border-radius:6px; }
+
+/* ----------------- Панель для карты ----------------- */
+.map-area{
+  flex:1 1 auto;      /* занимает всё оставшееся место */
+  position:relative;
+  z-index:1;
+  min-width:0;        /* важно, чтобы flex-контейнер уважал ширину */
+}
+
+/* Карта — занимает всё доступное место, при этом находится справа от сайдбара */
+#map{
+  height:100%;
+  width:100%;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
+  position:relative;
+  z-index:1;
+}
+
+/* Убедимся, что элементы Leaflet (контролы) не перекрывают сайдбар (вдоль левого края) */
+/* Если какие-то контролы оказались под сайдбаром — их z-index обычно < 1000; оставляем по умолчанию. */
+/* Но явный стиль для тулбаров (если потребуется) можно добавить отдельно. */
+
+/* ----------------- Маркеры (divIcon) ----------------- */
+.mw2-reg{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  pointer-events:none; /* клики обрабатывает маркер, не картинка */
+}
+.mw2-reg img{
+  display:block;
+  border-radius:6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.55);
+}
+.mw2-label{
+  margin-top:6px;
+  font-size:12px;
+  text-align:center;
+  color:#fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+  pointer-events:none;
+}
+
+/* ----------------- Кнопки инструментов ----------------- */
+button{
+  font-family:inherit;
+}
+.row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+
+/* ----------------- Адаптив ----------------- */
+@media (max-width:900px){
+  :root{ --sidebar-w: 300px; }
+  .sidebar{ width:var(--sidebar-w); flex:0 0 var(--sidebar-w); }
+}
+@media (max-width:700px){
+  /* На узких экранах — разместим сайдбар сверху, карту под ним */
+  .app{ flex-direction:column; }
+  .sidebar{ width:100%; flex: 0 0 auto; max-height:36vh; overflow:auto; }
+  .map-area{ height:64vh; }
+}
+/* ===== Мягкая подсветка иконок по командам ===== */
+
+/* Красная команда */
+.mw2-reg.red-marker img {
+  box-shadow: 0 0 4px 1px rgba(255, 40, 40, 0.4), 0 2px 6px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 40, 40, 0.4);
+}
+
+/* Синяя команда (зелёная подсветка) */
+.mw2-reg.blue-marker img {
+  box-shadow: 0 0 4px 1px rgba(0, 255, 100, 0.35), 0 2px 6px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 255, 100, 0.35);
+}
+
+/* === Убираем все подсказки Leaflet.Draw (drag handles, click to start и т.п.) === */
+.leaflet-draw-tooltip {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Убираем возможный остаточный фон / подсветку */
+.leaflet-draw-tooltip:before,
+.leaflet-draw-tooltip:after {
+  display: none !important;
+}
+
+/* Затемнение области карты за пределами изображения */
+.leaflet-container {
+  background-color: rgba(20, 22, 25, 0.85) !important; /* тёмно-серый, мягкий, не полностью непрозрачный */
+}
+
+/* === Светлая панель инструментов и зум-кнопки Leaflet === */
+.leaflet-control,
+.leaflet-draw-toolbar a,
+.leaflet-bar a {
+  background-color: rgba(200, 200, 200, 0.9) !important; /* светло-серый, мягкий */
+  border: 1px solid rgba(0, 0, 0, 0.15) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); /* лёгкая тень под кнопкой */
+}
+
+/* При наведении чуть темнее */
+.leaflet-control:hover,
+.leaflet-draw-toolbar a:hover,
+.leaflet-bar a:hover {
+  background-color: rgba(180, 180, 180, 0.95) !important;
+}
+
+/* Добавим тень белым иконкам (символы, зум и т.п.) */
+.leaflet-control img,
+.leaflet-draw-toolbar a img,
+.leaflet-bar a img,
+.leaflet-control svg {
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8)); /* делает белые иконки видимыми */
+}
+
+
+.leaflet-tooltip.symb-tooltip {
+  background: rgba(0,0,0,0.78);
+  color: #fff;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}

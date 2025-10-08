@@ -1,0 +1,1033 @@
+// script.js
+// ------------ Конфигурация ------------
+const MAP_COUNT = 25; // теперь map1..map25
+const MAP_FILE_PREFIX = "map"; // map1.jpg
+const MAP_FOLDER = "assets/maps/";
+const ICON_FOLDER = "assets/"; // assets/{nation}/regX.png
+
+// placeholder SVG data URI (показываем если иконка не найдена)
+const PLACEHOLDER_SVG = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128">
+     <rect width="100%" height="100%" fill="#444"/>
+     <text x="50%" y="54%" font-size="18" fill="#fff" text-anchor="middle" font-family="Arial">no</text>
+     <text x="50%" y="70%" font-size="12" fill="#ddd" text-anchor="middle" font-family="Arial">image</text>
+   </svg>`);
+
+// === Иконки в папке assets/symbols ===
+const ICON_NAMES = [
+  'symb1','symb2','symb3','symb4','symb5','symb6',
+  'symb7','symb8','symb9','symb10','symb11','symb12',
+  'symb13','symb14','symb15','symb16','symb17','symb18',
+  'symb19','symb20','symb21','symb22','symb23','symb24','symb25','symb26',
+  'symb27','symb28','symb29','symb30','symb31','symb32','symb33','symb34',
+  'symb35'
+];
+
+const ICON_CATEGORIES = {
+  unit: ['symb1','symb2','symb3','symb4','symb5','symb6',
+         'symb7','symb8','symb9','symb10','symb11','symb12',
+         'symb13','symb14','symb15','symb16','symb17','symb18'],
+  engineer: ['symb19','symb20','symb21','symb22','symb23','symb24','symb25','symb26',
+             'symb27','symb28','symb29'],
+  signs: ['symb31','symb32','symb33','symb34','symb35']
+};
+
+const ICON_LABELS = {
+  symb1:  'Бронеавтомобиль',
+  symb2:  'Гаубица',
+  symb3:  'Противотанковая пушка',
+  symb4:  'Противовоздушная оборона',
+  symb5:  'Основная пехота',
+  symb6:  'Тяжелая пехота',
+  symb7:  'Специальная пехота',
+  symb8:  'Вспомогательная пехота',
+  symb9:  'Подразделение поддержки',
+  symb10: 'Тяжелый танк',
+  symb11: 'Противотанковая САУ',
+  symb12: 'Легкий танк',
+  symb13: 'Средний танк',
+  symb14: 'Штурмовая САУ',
+  symb15: 'Самостоятельный пехотный отряд',
+  symb16: 'Парашютисты',
+  symb17: 'Фронтовая авиация',
+  symb18: 'Вспомогательная техника',
+symb19: 'ПП мины',
+  symb20: 'ПТ мины',
+  symb21: 'Бруствер',
+  symb22: 'Колючка',
+  symb23: 'Ежи',
+  symb24: 'ДОТ',
+  symb25: 'Окоп',
+  symb26: 'ДЗОТ',
+  symb27: 'Блиндаж',
+  symb28: 'Вышка пул.',
+  symb29: 'Окоп'
+};
+
+// Короткие подписи для всплывающей подсказки (используются при наведении)
+const ICON_SHORT = {
+  symb1:  'Бронеавто',
+  symb2:  'Гаубица',
+  symb3:  'ПТ пушка',
+  symb4:  'ПВО',
+  symb5:  'Пехота',
+  symb6:  'Тяж. пех.',
+  symb7:  'Спецпех.',
+  symb8:  'Всп. пех.',
+  symb9:  'Поддержка',
+  symb10: 'Тяж. танк',
+  symb11: 'ПТ САУ',
+  symb12: 'Лёг. танк',
+  symb13: 'Сред. танк',
+  symb14: 'Штурм. САУ',
+  symb15: 'Пех. отряд',
+  symb16: 'Десант',
+  symb17: 'Авиация',
+  symb18: 'Всп. тех.',
+symb19: 'ПП мины',
+  symb20: 'ПТ мины',
+  symb21: 'Бруствер',
+  symb22: 'Колючка',
+  symb23: 'Ежи',
+  symb24: 'ДОТ',
+  symb25: 'Окоп',
+  symb26: 'ДЗОТ',
+  symb27: 'Блиндаж',
+  symb28: 'Вышка пул.',
+symb29: 'Окоп'
+};
+
+// Отображаемые имена карт (в порядке map1..map25)
+const MAP_NAMES = {
+  1: "Airfield",
+  2: "Bazerville",
+  3: "Borovaya River",
+  4: "Carpathians",
+  5: "Champagne",
+  6: "Coast",
+  7: "Dead River",
+  8: "Estate",
+  9: "Farm Land",
+ 10: "Hunting Grounds",
+ 11: "Kursk Fields",
+ 12: "Nameless Height",
+ 13: "Polesie",
+ 14: "Port",
+ 15: "Saint Lot",
+ 16: "Suburb",
+ 17: "Valley of Death",
+ 18: "Village",
+ 19: "Volokalamsk Highway",
+ 20: "Witches Vale",
+ 21: "Winter March",
+ 22: "Chepel",
+ 23: "Crossroads",
+ 24: "Sandy Path",
+ 25: "Marl"
+};
+
+// Регистры (отображаемые названия полков) для каждой нации (reg1..reg17)
+const REG_NAMES = {
+  germany: {
+    1: "Самоходный",
+    2: "Развед",
+    3: "Механка",
+    4: "Гаубицы",
+    5: "Моторизованная пехота",
+    6: "Огнеметный",
+    7: "ПВО",
+    8: "Саперка",
+    9: "Гренадерский",
+    10: "Минометный",
+    11: "Штурмовой",
+    12: "Тяжелый танковый",
+    13: "Противотанковый",
+    14: "Средний танковый",
+    15: "Первый артиллерийский",
+    16: "Первый пехотный",
+    17: "Первый танковый"
+  },
+  usa: {
+    1: "Самоходный",
+    2: "Развед",
+    3: "Механка",
+    4: "Гаубицы",
+    5: "Моторизованная пехота",
+    6: "Огнеметный",
+    7: "ПВО",
+    8: "Десантный",
+    9: "Тяжелый танковый",
+    10: "Минометный",
+    11: "Саперный",
+    12: "Средний танковый",
+    13: "Противотанковый",
+    14: "Штурмовой",
+    15: "Первый артиллерийский",
+    16: "Первый пехотный",
+    17: "Первый танковый"
+  },
+  ussr: {
+    1: "Самоходный",
+    2: "Развед",
+    3: "Механка",
+    4: "Гаубицы",
+    5: "Моторизованная пехота",
+    6: "Огнеметный",
+    7: "ПВО",
+    8: "Саперка",
+    9: "Тяжелый танковый",
+    10: "Минометный",
+    11: "Штурмовой",
+    12: "Средний танковый",
+    13: "Противотанковый",
+    14: "88-ой штурмовой",
+    15: "Первый артиллерийский",
+    16: "Первый пехотный",
+    17: "Первый танковый"
+  }
+};
+
+//------------ Полезные утилиты ------------
+function $id(id){ return document.getElementById(id); }
+function createEl(tag, cls){ const e = document.createElement(tag); if(cls) e.className = cls; return e; }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+//------------ Инициализация карты и слоёв ------------
+let imageOverlay = null;
+let imageBounds = null;
+let currentMapFile = null;
+
+const map = L.map('map', {
+  crs: L.CRS.Simple,
+  minZoom: -1,
+  maxZoom: 4,
+  zoomSnap: 0.25,
+  zoomDelta: 0.5,
+});
+map.setView([0,0], 0);
+
+const drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
+
+// Контейнеры для маркеров/символов
+let markerList = []; // {id, team, playerIndex, nick, nation, regimentFile, marker}
+let simpleMarkers = []; // symbols from SimpleSymbols or others
+// keep track of player markers separately for easier removal
+// (we're using markerList as canonical list)
+
+// ------------ Draw control: ensure color/weight are applied ------------
+function getDrawColor(){ return $id('drawColor') ? $id('drawColor').value : '#ff0000'; }
+function getDrawWeight(){ return $id('drawWeight') ? Number($id('drawWeight').value) : 3; }
+
+// Create draw control with default options, but we will set style on created layers
+const drawControl = new L.Control.Draw({
+  position: 'topleft',
+  draw: {
+    marker: false,
+    polyline: true,
+    polygon: true,
+    rectangle: false,
+    circle: false,
+    circlemarker: false
+  },
+  edit: { featureGroup: drawnItems, remove: true }
+});
+map.addControl(drawControl);
+
+// When a new shape is created via Draw, apply current color/weight and add to drawnItems
+map.on(L.Draw.Event.CREATED, function (e) {
+  const layer = e.layer;
+  // apply style for polylines / polygons / circle
+  if (layer.setStyle) {
+    const style = { color: getDrawColor(), weight: getDrawWeight() };
+    if (layer instanceof L.Polygon) {
+      style.fillColor = getDrawColor();
+      style.fillOpacity = 0.15;
+    }
+    layer.setStyle(style);
+  }
+  if (layer instanceof L.Circle) {
+    // circle has options.radius already
+    // ensure stroke color/weight set
+    layer.setStyle && layer.setStyle({ color: getDrawColor(), weight: getDrawWeight() });
+  }
+  drawnItems.addLayer(layer);
+});
+
+// Ensure edits keep styles intact (nothing special needed, but keep handler)
+map.on(L.Draw.Event.EDITED, function (e) {
+  // no-op - layers are already in drawnItems
+});
+map.on(L.Draw.Event.DELETED, function (e) {
+  // no-op
+});
+
+// === SimpleSymbols с тремя вкладками ===
+const SimpleSymbols = L.Control.extend({
+  onAdd: function(map) {
+    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+    container.style.background = 'rgba(20,20,20,0.6)';
+    container.style.border = '1px solid rgba(255,255,255,0.15)';
+    container.style.cursor = 'pointer';
+    container.style.padding = '4px';
+
+    // === Верхняя панель вкладок ===
+    const tabs = L.DomUtil.create('div', '', container);
+    tabs.style.display = 'flex';
+    tabs.style.justifyContent = 'space-between';
+    tabs.style.marginBottom = '4px';
+
+    const tabNames = { unit: 'Боевые', engineer: 'Инженерные', signs: 'Знаки' };
+    const menus = {};
+
+    // создаём кнопки вкладок и меню для каждой категории
+    for (const key in tabNames) {
+      const btn = L.DomUtil.create('a', '', tabs);
+      btn.textContent = tabNames[key];
+      btn.style.flex = '1';
+      btn.style.textAlign = 'center';
+      btn.style.padding = '2px 0';
+      btn.style.cursor = 'pointer';
+      btn.style.background = 'rgba(40,40,40,0.6)';
+      btn.style.color = 'white';
+      btn.style.border = '1px solid rgba(255,255,255,0.1)';
+      btn.style.userSelect = 'none';
+
+      const menu = L.DomUtil.create('div', '', container);
+      menu.style.display = 'none';
+      menu.style.marginTop = '2px';
+      menu.style.maxHeight = '250px';
+      menu.style.overflowY = 'auto';
+      menu.style.background = 'rgba(0,0,0,0.7)';
+      menu.style.border = '1px solid rgba(255,255,255,0.1)';
+      menu.style.borderRadius = '6px';
+      menu.style.padding = '2px';
+      menus[key] = menu;
+
+      btn.addEventListener('click', () => {
+        for (const k in menus) {
+          menus[k].style.display = (k === key && menus[k].style.display === 'none') ? 'block' : 'none';
+        }
+      });
+    }
+
+    // === Добавляем символы в каждое меню ===
+    for (const category in ICON_CATEGORIES) {
+      const menu = menus[category];
+      ICON_CATEGORIES[category].forEach(name => {
+        const btn = L.DomUtil.create('a', '', menu);
+        btn.style.display = 'inline-block';
+        btn.style.width = '34px';
+        btn.style.height = '34px';
+        btn.style.margin = '2px';
+        btn.style.textAlign = 'center';
+        btn.style.verticalAlign = 'middle';
+        btn.innerHTML = `<img src="assets/symbols/${name}.png" 
+                          alt="${name}" 
+                          title="${ICON_LABELS[name] || name}" 
+                          style="width:28px;height:28px;pointer-events:none">`;
+
+        L.DomEvent.on(btn, 'click', e => {
+          L.DomEvent.stopPropagation(e);
+          L.DomEvent.preventDefault(e);
+          const mk = addCustomIcon(`assets/symbols/${name}.png`, map.getCenter());
+          if (mk) mk._symbName = name;
+          simpleMarkers.push(mk);
+        });
+      });
+    }
+
+    return container;
+  }
+});
+
+map.addControl(new SimpleSymbols({ position: 'topleft' }));
+
+// === addSimpleSymbol с масштабируемыми иконками ===
+function addSimpleSymbol(type, latlng) {
+  const color = getDrawColor(); // use selected color
+  const size = 60;
+
+  let html = '';
+  switch(type) {
+    case 'dot': html = `<div style="color:${color};font-size:${size}px;">●</div>`; break;
+    case 'x': html = `<div style="color:${color};font-size:${size}px;">✖</div>`; break;
+    case 'arrow': html = `<div style="color:${color};font-size:${size}px;">↑</div>`; break;
+    case 'triangle': html = `<div style="color:${color};font-size:${size}px;">▲</div>`; break;
+    case 'diamond': html = `<div style="color:${color};font-size:${size}px;">◆</div>`; break;
+    case 'skull': html = `<div style="color:${color};font-size:${size}px;">☠</div>`; break;
+    case 'cross': html = `<div style="color:${color};font-size:${size}px;">☧</div>`; break;
+    default: html = `<div style="color:${color};font-size:${size}px;">?</div>`;
+  }
+
+  const marker = L.marker(latlng, {
+    icon: L.divIcon({
+      html,
+      className: 'symbol-marker',
+      iconSize: [size, size],
+      iconAnchor: [size/2, size/2]
+    }),
+    draggable: true
+  }).addTo(map);
+
+ // === Добавляем подсказку с кратким названием символа ===
+  const match = url.match(/\/(symb\d+)\.png$/);
+  if (match) {
+    const key = match[1];
+    const shortLabel = ICON_LABELS[key]
+      ? ICON_LABELS[key].replace(/пехота|поддержки|оборона|танк(овый)?|самоходн(ая|ый)?|пушка|автомобиль|техника|авиация|отряд/gi, '').trim()
+      : key;
+    marker.bindTooltip(shortLabel, {
+      permanent: false,
+      direction: "top",
+      offset: [0, -20],
+      opacity: 0.9
+    });
+  }
+
+marker.on('click', () => {
+  if (confirm('Удалить этот символ?')) {
+    map.removeLayer(marker);
+    const idx = simpleMarkers.indexOf(marker);
+    if (idx !== -1) simpleMarkers.splice(idx, 1);
+  }
+});
+  return marker;
+}
+
+function addCustomIcon(url, latlng) {
+  const marker = L.marker(latlng, {
+    icon: L.icon({
+      iconUrl: url,
+      iconSize: [48, 48],
+      iconAnchor: [24, 24]
+    }),
+    draggable: true
+  }).addTo(map);
+
+  // === Добавляем подсказку с кратким названием символа ===
+  try {
+    // Получаем имя файла, например "symb1.png" -> key = "symb1"
+    const file = String(url).split('/').pop() || '';
+    const key = file.replace(/\.[^/.]+$/, ''); // убираем расширение
+    const label = (ICON_SHORT[key] || ICON_LABELS[key] || key);
+
+    // Привязываем tooltip (показывается при наведении)
+    marker.bindTooltip(label, {
+      permanent: false,
+      direction: "top",
+      offset: [0, -26],
+      opacity: 0.95,
+      className: 'symb-tooltip' // можно стилизовать в CSS
+    });
+
+    // сохраняем имя символа у маркера (используется при сохранении/удалении)
+    marker._symbName = key;
+  } catch (e) {
+    // ничего критичного, просто пропускаем
+    console.warn('tooltip bind error', e);
+  }
+
+  marker.on('click', () => {
+    if (confirm('Удалить этот символ?')) {
+      map.removeLayer(marker);
+      const idx = simpleMarkers.indexOf(marker);
+      if (idx !== -1) simpleMarkers.splice(idx, 1);
+    }
+  });
+
+  return marker;
+}
+
+
+//------------ Заполнение списка карт автоматически ------------
+const mapSelect = $id('mapSelect');
+for (let i = 1; i <= MAP_COUNT; i++) {
+  const baseName = MAP_NAMES[i] || `map${i}`;
+
+  // --- Вариант A ---
+  const optA = createEl('option');
+  optA.value = `${MAP_FILE_PREFIX}${i}.jpg`;
+  optA.textContent = `${i}. ${baseName}-a`;
+  mapSelect.appendChild(optA);
+
+  // --- Вариант B ---
+  const optB = createEl('option');
+  optB.value = `${MAP_FILE_PREFIX}${i}-alt.jpg`;
+  optB.textContent = `${i}. ${baseName}-b`;
+  mapSelect.appendChild(optB);
+}
+
+//------------ Загрузка карты (imageOverlay) ------------
+function loadMapByFile(fileName){
+  // Возвращаем Promise, чтобы можно было дождаться загрузки
+  return new Promise((resolve, reject) => {
+    // удаляем старую
+    if(imageOverlay) {
+      try { map.removeLayer(imageOverlay); } catch(e){}
+      imageOverlay = null; imageBounds = null; currentMapFile = null;
+    }
+
+    const url = MAP_FOLDER + fileName;
+    // загружаем картинку чтобы узнать размеры
+    const img = new Image();
+    img.onload = function(){
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      // bounds: top-left [0,0], bottom-right [h, w] (lat,lng order for CRS.Simple)
+      imageBounds = [[0,0],[h,w]];
+      // сбрасываем CRS и view: для простоты используем CRS.Simple and set view to center
+      imageOverlay = L.imageOverlay(url, imageBounds).addTo(map);
+      // ensure overlay is behind markers/drawn items
+      if (imageOverlay && typeof imageOverlay.bringToBack === 'function') {
+        imageOverlay.bringToBack();
+      }
+      map.fitBounds(imageBounds);
+      currentMapFile = fileName;
+      resolve();
+    };
+    img.onerror = function(){
+      reject(new Error('Не удалось загрузить файл карты: ' + url + '. Проверьте, что файл существует и название/регистр совпадают.'));
+    };
+    img.src = url;
+  });
+}
+
+$id('btnLoadMap').addEventListener('click', ()=> {
+  const sel = mapSelect.value;
+  if(!sel) return alert('Выберите карту в списке.');
+  loadMapByFile(sel).catch(err => alert(err.message));
+});
+
+$id('btnResetMap').addEventListener('click', ()=>{
+  if(imageOverlay) map.removeLayer(imageOverlay);
+  imageOverlay = null; imageBounds = null; currentMapFile = null;
+  // сброс view
+  map.setView([0,0], 0);
+});
+
+//------------ Создание UI для игроков (2 команды по 5) ------------
+const RED_PLAYERS = $id('redPlayers');
+const BLUE_PLAYERS = $id('bluePlayers');
+const NATIONS = ['ussr','germany','usa'];
+
+function makePlayerRow(team, index){
+  // keep original indexing as in your code (index passed 1..5 earlier) - we'll use 1-based here for label but store 0-based where needed
+  const row = createEl('div','player-row');
+  const nickId = `${team}-nick-${index}`;
+  const nationId = `${team}-nation-${index}`;
+  const regId = `${team}-reg-${index}`;
+  row.innerHTML = `
+    <input id="${nickId}" type="text" placeholder="Ник" />
+    <select id="${nationId}" class="nation-select"></select>
+    <select id="${regId}" class="reg-select"></select>
+    <button id="${team}-place-${index}">Поставить</button>
+  `;
+  // заполним нации
+  const nationSel = row.querySelector(`#${nationId}`);
+  NATIONS.forEach(n => {
+    const o = createEl('option'); o.value = n; o.textContent = n.toUpperCase(); nationSel.appendChild(o);
+  });
+  // при смене нации обновим полки
+  const regSel = row.querySelector(`#${regId}`);
+  function fillRegOptions(nation){
+    regSel.innerHTML = '';
+    const regs = REG_NAMES[nation] || {};
+    // добавляем до 17
+    for(let i=1;i<=17;i++){
+      const opt = createEl('option');
+      opt.value = `reg${i}.png`;
+      opt.textContent = (regs[i] || `Полк ${i}`);
+      regSel.appendChild(opt);
+    }
+  }
+  fillRegOptions(nationSel.value);
+  nationSel.addEventListener('change', ()=> fillRegOptions(nationSel.value));
+
+  // кнопка поставить
+  const btn = row.querySelector(`#${team}-place-${index}`);
+  btn.addEventListener('click', ()=>{
+    const nick = (row.querySelector(`#${nickId}`).value || `Игрок ${index}`);
+    const nation = row.querySelector(`#${nationId}`).value;
+    const regiment = row.querySelector(`#${regId}`).value;
+    placeMarker(nick, nation, regiment, team, index-1); // store 0-based index internally
+  });
+
+  return row;
+}
+
+for(let i=1;i<=5;i++){
+  RED_PLAYERS.appendChild(makePlayerRow('red', i));
+  BLUE_PLAYERS.appendChild(makePlayerRow('blue', i));
+}
+
+//------------ Управление маркерами ------------
+function generateMarkerId(team, idx){ return `${team}-${idx}`; }
+
+// создаём divIcon с <img onerror=...> чтобы показывать заглушку если не нашлось
+function createRegDivIcon(nick, nation, regimentFile, team) {
+  const iconUrl = `${ICON_FOLDER}${nation}/${regimentFile}`;
+  const size = 56;
+
+  // Назначаем класс в зависимости от выбранной команды
+  const teamClass =
+    team === 'blue' ? 'blue-marker' : team === 'red' ? 'red-marker' : '';
+
+  const html = `
+    <div class="mw2-reg ${teamClass}">
+      <img src="${iconUrl}" 
+           onerror="this.src='${PLACEHOLDER_SVG}'; this.style.width='56px'; this.style.height='56px'"
+           style="width:${size}px;height:${size}px;object-fit:contain;" />
+      <div class="mw2-label">${escapeHtml(nick)}</div>
+    </div>`;
+
+  return L.divIcon({
+    html,
+    className: '',
+    iconSize: [size, size + 18],
+    iconAnchor: [Math.round(size / 2), Math.round(size / 2)],
+  });
+}
+function placeMarker(nick, nation, regimentFile, team, playerIndex){
+  const id = generateMarkerId(team, playerIndex);
+
+  // удалим старый маркер этого игрока, если есть
+  const existingIndex = markerList.findIndex(m => m.id === id);
+  if (existingIndex !== -1) {
+    try { map.removeLayer(markerList[existingIndex].marker); } catch(e){}
+    markerList.splice(existingIndex, 1);
+  }
+
+  // позиция: центр карты (или центр изображения)
+  const pos = map.getCenter();
+  const icon = createRegDivIcon(nick, nation, regimentFile, team);
+  const marker = L.marker(pos, { icon, draggable: true }).addTo(map);
+
+  // не добавляем tooltip (как ты попросил удалить)
+  marker.on('dragend', ()=> {
+    // можно отлавливать новые координаты при необходимости
+  });
+
+  const entry = { id, team, playerIndex, nick, nation, regimentFile, marker };
+  markerList.push(entry);
+}
+
+//------------ Кнопки готовых символов ------------
+$id('btnFront').addEventListener('click', ()=>{
+  if(!imageBounds) return alert('Загрузите карту перед добавлением символов (кнопка "Загрузить карту").');
+  // фронт: прямая линия через центр горизонтально
+  const b = imageBounds;
+  const y = (b[0][0] + b[1][0]) / 2;
+  const left = [y, b[0][1] + (b[1][1]-b[0][1])*0.05];
+  const right = [y, b[1][1] - (b[1][1]-b[0][1])*0.05];
+  const color = getDrawColor();
+  const weight = getDrawWeight();
+  const line = L.polyline([left, right], { color, weight }).addTo(drawnItems);
+});
+
+
+
+//------------ Ластик и очистка ------------
+$id('btnEraser').addEventListener('click', ()=>{
+  if(!confirm('Удалить ВСЕ рисунки на карте?')) return;
+  drawnItems.clearLayers();
+});
+
+$id('btnClearAll').addEventListener('click', ()=>{
+  if(!confirm('Очистить карту полностью? (иконки и рисунки)')) return;
+  // удалить маркеры
+  markerList.forEach(m => { try { map.removeLayer(m.marker); } catch(e){} });
+  markerList = [];
+  // удалить простые символы
+  simpleMarkers.forEach(m => { try { map.removeLayer(m); } catch(e){} });
+  simpleMarkers = [];
+  // удалить рисунки
+  drawnItems.clearLayers();
+});
+
+//------------ Полоса толщины (связываем с UI) ------------
+$id('drawWeight').addEventListener('input', (e)=>{
+  $id('weightVal').textContent = e.target.value;
+});
+
+// ------------ Сохранение плана в JSON ------------
+$id('btnSave').addEventListener('click', ()=>{
+  if(!currentMapFile) {
+    if(!confirm('Карта не загружена. Сохранить план без привязки к файлу карты?')) {
+      return;
+    }
+  }
+
+  // Сохранение маркеров
+  const markers = markerList.map(m => ({
+    id: m.id,
+    team: m.team,
+    playerIndex: m.playerIndex,
+    nick: m.nick,
+    nation: m.nation,
+    regimentFile: m.regimentFile,
+    latlng: m.marker.getLatLng()
+  }));
+
+  // Сохранение простых символов (html + latlng)
+  const simple = simpleMarkers.map(m => {
+    const el = m.getElement ? m.getElement() : null;
+    return {
+      latlng: m.getLatLng(),
+      html: el ? el.innerHTML : null
+    };
+  });
+
+  // Сохранение рисунков (iterating drawnItems to capture type and options)
+  const drawings = [];
+  drawnItems.eachLayer(layer => {
+    try {
+      if (layer instanceof L.Polyline && !(layer instanceof L.Polygon)) {
+        drawings.push({
+          type: 'polyline',
+          latlngs: layer.getLatLngs().map(p => ({ lat: p.lat, lng: p.lng })),
+          options: pickLayerOptions(layer)
+        });
+      } else if (layer instanceof L.Polygon) {
+        // polygon may have nested latlngs (array of rings)
+        const rings = layer.getLatLngs();
+        // take outer ring if exists
+        if (Array.isArray(rings) && rings.length > 0) {
+          drawings.push({
+            type: 'polygon',
+            latlngs: rings[0].map(p => ({ lat: p.lat, lng: p.lng })),
+            options: pickLayerOptions(layer)
+          });
+        } else {
+          drawings.push({
+            type: 'polygon',
+            latlngs: layer.getLatLngs().map(p => ({ lat: p.lat, lng: p.lng })),
+            options: pickLayerOptions(layer)
+          });
+        }
+      } else if (layer instanceof L.Circle) {
+        drawings.push({
+          type: 'circle',
+          center: layer.getLatLng(),
+          radius: layer.getRadius(),
+          options: pickLayerOptions(layer)
+        });
+      } else {
+        // fallback to geojson
+        const gj = layer.toGeoJSON ? layer.toGeoJSON() : null;
+        drawings.push({ type: 'geojson', geojson: gj, options: pickLayerOptions(layer) });
+      }
+    } catch(e){
+      // ignore a layer we can't serialize
+      console.warn('serialize drawing error', e);
+    }
+  });
+
+  const plan = {
+    meta: {
+      createdAt: (new Date()).toISOString(),
+      mapFile: currentMapFile || null
+    },
+    markers,
+    simple,
+    drawings,
+    mapState: imageBounds ? { bounds: imageBounds } : null
+  };
+
+  const blob = new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'mow2_plan.json';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// helper: pick layer options we care about (color, weight, fillColor, fillOpacity)
+function pickLayerOptions(layer){
+  const o = {};
+  if (!layer || !layer.options) return o;
+  const opt = layer.options;
+  if (opt.color) o.color = opt.color;
+  if (opt.weight) o.weight = opt.weight;
+  if (opt.fillColor) o.fillColor = opt.fillColor;
+  if (typeof opt.fillOpacity !== 'undefined') o.fillOpacity = opt.fillOpacity;
+  if (typeof opt.radius !== 'undefined') o.radius = opt.radius;
+  return o;
+}
+
+// === Функция загрузки плана ===
+function loadPlanData(plan) {
+  if (!plan) return;
+
+  // --- 1. Очистка карты ---
+  drawnItems.clearLayers();
+  markerList.forEach(m => {
+    try { map.removeLayer(m.marker); } catch(e){}
+  });
+  markerList = [];
+  simpleMarkers.forEach(m => { try { map.removeLayer(m); } catch(e){} });
+  simpleMarkers = [];
+
+  // --- 2. Восстановление карты ---
+  const mapFile = plan.meta?.mapFile || "map1.jpg";
+  if (mapSelect) mapSelect.value = mapFile;
+
+  // load map and then restore everything
+  loadMapByFile(mapFile).then(() => {
+    // --- 3. Восстановление маркеров ---
+    if (Array.isArray(plan.markers)) {
+      plan.markers.forEach(m => {
+        const iconUrl = `${ICON_FOLDER}${m.nation}/${m.regimentFile}`;
+        const marker = L.marker([m.latlng.lat, m.latlng.lng], {
+          draggable: true,
+          icon: L.divIcon({
+            html: `<div class="mw2-reg">
+                    <img src="${iconUrl}" onerror="this.src='${PLACEHOLDER_SVG}'; this.style.width='56px'; this.style.height='56px'" 
+                         style="width:56px;height:56px;object-fit:contain;" />
+                    <div class="mw2-label">${escapeHtml(m.nick)}</div>
+                   </div>`,
+            className: "",
+            iconSize: [56, 56 + 18],
+            iconAnchor: [28, 28]
+          })
+        }).addTo(map);
+
+        markerList.push({
+          id: m.id,
+          team: m.team,
+          playerIndex: m.playerIndex,
+          nick: m.nick,
+          nation: m.nation,
+          regimentFile: m.regimentFile,
+          marker
+        });
+      });
+    }
+
+    // --- 4. Восстановление простых символов ---
+    if (Array.isArray(plan.simple)) {
+  plan.simple.forEach(s => {
+    try {
+      const lat = s.latlng.lat || (s.latlng[0] && s.latlng[0].lat) || s.lat;
+      const lng = s.latlng.lng || (s.latlng[0] && s.latlng[0].lng) || s.lng;
+      const marker = L.marker([lat, lng], {
+        icon: L.divIcon({ html: s.html || '', className: 'symbol-marker' }),
+        draggable: true
+      }).addTo(map);
+
+      // Попробуем достать имя symbX из html (если там есть <img src="...symbN.png">)
+      try {
+        const html = s.html || '';
+        const m = html.match(/\/(symb\d+)\.png/i);
+        if (m) {
+          const key = m[1];
+          const label = (ICON_SHORT[key] || ICON_LABELS[key] || key);
+          marker.bindTooltip(label, {
+            permanent: false,
+            direction: "top",
+            offset: [0, -26],
+            opacity: 0.95,
+            className: 'symb-tooltip'
+          });
+          marker._symbName = key;
+        }
+      } catch(e) {
+        // ignore parsing errors
+      }
+
+      simpleMarkers.push(marker);
+    } catch(e){}
+  });
+}
+
+    // --- 5. Восстановление рисунков ---
+    if (Array.isArray(plan.drawings)) {
+      plan.drawings.forEach(d => {
+        try {
+          if (d.type === 'polyline') {
+            const latlngs = d.latlngs.map(p => [p.lat, p.lng]);
+            L.polyline(latlngs, d.options || {}).addTo(drawnItems);
+          } else if (d.type === 'polygon') {
+            const latlngs = d.latlngs.map(p => [p.lat, p.lng]);
+            L.polygon(latlngs, d.options || {}).addTo(drawnItems);
+          } else if (d.type === 'circle') {
+            const center = [d.center.lat, d.center.lng];
+            L.circle(center, { radius: d.radius, ...(d.options || {}) }).addTo(drawnItems);
+          } else if (d.type === 'geojson') {
+            L.geoJSON(d.geojson).eachLayer(layer => drawnItems.addLayer(layer));
+          }
+        } catch(e){
+          console.warn('Ошибка восстановления рисунка:', e);
+        }
+      });
+    }
+
+    alert("✅ План успешно загружен!");
+  }).catch(err => {
+    console.error("Ошибка при загрузке карты для плана:", err);
+    alert("Ошибка при загрузке карты/плана: " + (err.message || err));
+  });
+}
+
+// === Обработчик кнопки загрузки плана ===
+document.getElementById("loadPlan").addEventListener("click", () => {
+  const input = document.getElementById("planFileInput");
+  input.value = null; // сброс предыдущего выбора
+  input.click();
+});
+
+document.getElementById("planFileInput").addEventListener("change", function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      loadPlanData(data);  // <-- функция загрузки плана
+    } catch(err) {
+      console.error(err);
+      alert("Ошибка при загрузке файла плана!");
+    } finally {
+      e.target.value = null; // сброс input после загрузки
+    }
+  };
+  reader.readAsText(file);
+});
+
+map.attributionControl.setPrefix(false); // убирает "Leaflet"
+map.attributionControl.addAttribution(''); // очищает оставшийся текст
+
+$id('btnFillLower').addEventListener('click', () => {
+  if (!imageBounds) return alert('Сначала загрузите карту.');
+
+  const color = getDrawColor();
+
+  const top = imageBounds[0][0];    // верх карты = 0
+  const bottom = imageBounds[1][0]; // низ карты = высота изображения
+  const left = imageBounds[0][1];   // левый край = 0
+  const right = imageBounds[1][1];  // правый край = ширина изображения
+
+  const midY = (top + bottom) / 2;
+
+  L.polygon([
+    [midY, left],    // середина слева
+    [midY, right],   // середина справа
+    [bottom, right], // низ справа
+    [bottom, left]   // низ слева
+  ], {
+    color: color,
+    weight: 2,
+    fillColor: color,
+    fillOpacity: 0.10
+  }).addTo(drawnItems);
+});
+
+let assaultTimer = null;
+
+function toggleAssault() {
+  if (assaultTimer) {
+    clearInterval(assaultTimer);
+    assaultTimer = null;
+    alert("Наступление остановлено");
+    return;
+  }
+
+  if (!imageBounds) return alert("Сначала загрузите карту!");
+
+  const top = imageBounds[0][0];    // верх карты
+  const bottom = imageBounds[1][0]; // низ карты
+  const left = imageBounds[0][1];
+  const right = imageBounds[1][1];
+
+  const waveInterval = 30000;  // каждые 30 секунд
+  const frontDuration = 8000;  // длительность движения
+
+  function spawnArrowSVG() {
+    const xMid = left + Math.random() * (right - left); // случайно по горизонтали
+    const yStart = bottom - 5;                           // чуть выше низа
+    const yEnd = top + (bottom - top) * 0.45;           // чуть ниже верхнего края / до середины
+
+    // SVG стрелка (вершина стрелки смотрит вверх)
+    const svg = `
+      <svg width="40" height="60" viewBox="0 0 40 60" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="20,60 35,10 20,20 5,10" fill="#ff3300" fill-opacity="0.35"/>
+      </svg>
+    `;
+
+    const icon = L.divIcon({
+      html: svg,
+      className: 'assault-arrow',
+      iconSize: [40, 60],
+      iconAnchor: [20, 60], // нижняя точка стрелки на маркере
+    });
+
+    const marker = L.marker([yStart, xMid], { icon, interactive: false }).addTo(drawnItems);
+
+    const startTime = performance.now();
+    function animate() {
+      const now = performance.now();
+      const progress = Math.min((now - startTime) / frontDuration, 1);
+      const newY = yStart - (yStart - yEnd) * progress; // движение вверх
+
+      marker.setLatLng([newY, xMid]);
+
+      if (progress < 1) requestAnimationFrame(animate);
+      else setTimeout(() => drawnItems.removeLayer(marker), 2000);
+    }
+    requestAnimationFrame(animate);
+  }
+
+  // первый запуск сразу
+  spawnArrowSVG();
+  assaultTimer = setInterval(spawnArrowSVG, waveInterval);
+}
+
+// кнопка
+document.getElementById("btnAssault").addEventListener("click", toggleAssault);
+
+// ------------ Сохранить карту как изображение (исправлено: без сдвигов полигонов) ------------
+async function saveMapAsImage() {
+  if (typeof leafletImage === 'undefined') {
+    alert("Библиотека leaflet-image не загружена!");
+    return;
+  }
+
+  // генерируем картинку из карты
+  leafletImage(map, function(err, canvas) {
+    if (err || !canvas) {
+      console.error(err);
+      alert('Ошибка при создании изображения карты');
+      return;
+    }
+
+    // имя файла с датой
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[:T]/g, '-').split('.')[0];
+    const filename = `map_snapshot_${timestamp}.png`;
+
+    // создаём Blob для скачивания
+    canvas.toBlob(function(blob) {
+      if (!blob) return;
+
+      // сохраняем файл
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      // копируем в буфер обмена (если доступно)
+      if (navigator.clipboard && window.ClipboardItem) {
+        const item = new ClipboardItem({ "image/png": blob });
+        navigator.clipboard.write([item])
+          .then(() => console.log('✅ Карта скопирована в буфер обмена'))
+          .catch(err => console.warn('Ошибка копирования в буфер:', err));
+      }
+    });
+  });
+}
+
+document.getElementById('btnSaveImage').addEventListener('click', saveMapAsImage);
