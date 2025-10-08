@@ -967,31 +967,41 @@ document.getElementById("btnAssault").addEventListener("click", toggleAssault);
 
 // ------------ Сохранить карту как изображение (исправлено: без сдвигов полигонов) ------------
 
-// --- Ограничиваем снимок только областью карты (imageOverlay) ---
-if (!imageBounds || !imageOverlay) {
-  alert("Карта не загружена — нечего сохранять!");
-  return;
+function saveMapAsImage() {
+  if (!imageBounds || !imageOverlay) {
+    return alert("Карта не загружена — нечего сохранять!");
+  }
+
+  // получаем контейнер карты
+  const mapContainer = document.getElementById('map');
+
+  // вычисляем pixel bounds overlay относительно контейнера
+  const topLeft = map.latLngToContainerPoint(imageBounds[0]);
+  const bottomRight = map.latLngToContainerPoint(imageBounds[1]);
+  const cropX = Math.round(topLeft.x);
+  const cropY = Math.round(topLeft.y);
+  const cropWidth = Math.round(bottomRight.x - topLeft.x);
+  const cropHeight = Math.round(bottomRight.y - topLeft.y);
+
+  html2canvas(mapContainer, {
+    x: cropX,
+    y: cropY,
+    width: cropWidth,
+    height: cropHeight,
+    useCORS: true,
+    allowTaint: true,
+    backgroundColor: null,
+    scale: 2
+  }).then(canvas => {
+    const link = document.createElement('a');
+    link.download = currentMapFile ? currentMapFile.replace(/\.[^/.]+$/, '') + '_plan.png' : 'map_plan.png';
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  }).catch(err => {
+    console.error("Ошибка сохранения карты:", err);
+    alert("Ошибка при сохранении изображения. Смотрите консоль.");
+  });
 }
 
-// вычисляем границы карты в пикселях относительно контейнера
-const topLeft = map.latLngToContainerPoint(imageBounds[0]);
-const bottomRight = map.latLngToContainerPoint(imageBounds[1]);
-
-const cropX = rect.left + window.scrollX + topLeft.x;
-const cropY = rect.top + window.scrollY + topLeft.y;
-const cropWidth = bottomRight.x - topLeft.x;
-const cropHeight = bottomRight.y - topLeft.y;
-
-// делаем снимок только этой области
-html2canvas(document.body, {
-  x: cropX,
-  y: cropY,
-  width: cropWidth,
-  height: cropHeight,
-  useCORS: true,
-  allowTaint: true,
-  backgroundColor: null,
-  scale: 2
-})
-
+// Привязываем к кнопке
 document.getElementById('btnSaveImage').addEventListener('click', saveMapAsImage);
