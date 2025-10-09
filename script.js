@@ -91,7 +91,7 @@ const MAP_NAMES = {
  12: "Nameless Height",
  13: "Polesie",
  14: "Port",
- 15: "Saint Lot",
+ 15: "Saint Lo",
  16: "Suburb",
  17: "Valley of Death",
  18: "Village",
