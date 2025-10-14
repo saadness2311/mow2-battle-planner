@@ -42,37 +42,35 @@
         <div class="row">
           <label>Цвет: <input type="color" id="drawColor" value="#ff0000" /></label>
         </div>
+        <div class="row" style="display: flex; align-items: center; gap: 10px;">
+ 	 <label for="drawWeight">Толщина:</label>
+  	<input id="drawWeight" type="range" min="1" max="12" step="1" value="3" />
+  	<span id="weightVal">3</span>
+	</div>
         <div class="row">
-          <label>Толщина: 
-            <input id="drawWeight" type="range" min="1" max="12" step="1" value="3" />
-          </label>
-          <span id="weightVal">3</span>
-        </div>
-        <div class="row">
-          <button id="btnFront">Добавить «Фронт»</button>
+          <button id="btnFront">Нанести линию фронта</button>
         </div>
 <div class="row">
-  <button id="btnFillLower">Заполнить область</button>
+  <button id="btnFillLower">Нанести область противника</button>
 </div>
 <div class="row">
   <button id="btnAssault">Наступление противника</button>
 </div>
         <div class="row">
-          <button id="btnEraser">Ластик (удалить рисунки)</button>
-          <button id="btnClearAll">Очистить карту (иконки + рисунки)</button>
+          <button id="btnEraser">Очистить фронт</button>
+          <button id="btnClearAll">Очистить карту</button>
         </div>
         <div class="row">
-          <button id="btnSave">Сохранить план (.json)</button>
+          <button id="btnSave">Сохранить план</button>
         </div>
-        <button id="btnSaveImage">Сохранить карту как картинку</button>
+        <button id="btnSaveImage">Сохранить карту как .jpg</button>
         <button id="loadPlan">Загрузить план</button>
         <input type="file" id="planFileInput" accept=".json" style="display:none" />
         <div class="note">
-          Инструменты рисования находятся на панели карты. 
-          Нужно нажимать "edit" и менять линию фронта. 
-          Нужно сохранять изменения "save".<br>
-          Маркеры можно перетаскивать. Можно сохранять план. 
-          <small>Автор — <strong>saadness</strong></small>
+          <small>Инструменты рисования находятся на панели карты. 
+        Нужно нажимать "edit" и менять линию фронта. 
+        Нужно сохранять изменения "save".<br>
+	Автор — saadness</small>
         </div>
       </section>
     </aside>

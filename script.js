@@ -170,6 +170,19 @@ function $id(id){ return document.getElementById(id); }
 function createEl(tag, cls){ const e = document.createElement(tag); if(cls) e.className = cls; return e; }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
 
+//--------------------Исправление рисунков в эшелонах
+
+function pickLayerOptions(layer) {
+  const opts = {};
+  if (layer.options) {
+    if (layer.options.color) opts.color = layer.options.color;
+    if (layer.options.weight != null) opts.weight = layer.options.weight;
+    if (layer.options.fillColor) opts.fillColor = layer.options.fillColor;
+    if (layer.options.fillOpacity != null) opts.fillOpacity = layer.options.fillOpacity;
+  }
+  return opts;
+}
+
 //------------ Инициализация карты и слоёв ------------
 let imageOverlay = null;
 let imageBounds = null;
@@ -186,6 +199,15 @@ map.setView([0,0], 0);
 
 const drawnItems = new L.FeatureGroup();
 map.addLayer(drawnItems);
+
+// ------------ Эшелоны (3 состояния карты) ------------
+const ECHELON_COUNT = 3;
+let currentEchelon = 1;
+let echelonStates = {
+  1: { markers: [], simple: [], drawings: [] },
+  2: { markers: [], simple: [], drawings: [] },
+  3: { markers: [], simple: [], drawings: [] }
+};
 
 // Контейнеры для маркеров/символов
 let markerList = []; // {id, team, playerIndex, nick, nation, regimentFile, marker}
@@ -211,6 +233,82 @@ const drawControl = new L.Control.Draw({
   edit: { featureGroup: drawnItems, remove: true }
 });
 map.addControl(drawControl);
+
+// ------------ Панель управления эшелонами ------------
+const echelonControl = L.control({ position: 'topright' });
+
+echelonControl.onAdd = function(map) {
+  const container = L.DomUtil.create('div', 'leaflet-bar echelon-control');
+  container.style.background = 'rgba(25,25,25,0.75)';
+  container.style.color = 'white';
+  container.style.padding = '6px 10px';
+  container.style.border = '1px solid rgba(255,255,255,0.2)';
+  container.style.borderRadius = '8px';
+  container.style.display = 'flex';
+  container.style.alignItems = 'center';
+  container.style.gap = '6px';
+  container.style.userSelect = 'none';
+  container.style.fontFamily = 'sans-serif';
+  container.style.fontSize = '14px';
+
+  const leftBtn = L.DomUtil.create('button','',container);
+  leftBtn.innerHTML = '⟵';
+  leftBtn.style.background = 'none';
+  leftBtn.style.color = 'white';
+  leftBtn.style.border = 'none';
+  leftBtn.style.cursor = 'pointer';
+  leftBtn.title = 'Предыдущий эшелон';
+
+  const label = L.DomUtil.create('span','',container);
+  label.textContent = `Эшелон ${currentEchelon}/${ECHELON_COUNT}`;
+  label.style.minWidth = '80px';
+  label.style.textAlign = 'center';
+
+  const rightBtn = L.DomUtil.create('button','',container);
+  rightBtn.innerHTML = '⟶';
+  rightBtn.style.background = 'none';
+  rightBtn.style.color = 'white';
+  rightBtn.style.border = 'none';
+  rightBtn.style.cursor = 'pointer';
+  rightBtn.title = 'Следующий эшелон';
+
+  const copyBtn = L.DomUtil.create('button','',container);
+  copyBtn.innerHTML = '📋';
+  copyBtn.style.background = 'none';
+  copyBtn.style.color = 'white';
+  copyBtn.style.border = 'none';
+  copyBtn.style.cursor = 'pointer';
+  copyBtn.title = 'Копировать текущее состояние в следующий эшелон';
+
+  // обработчики
+  L.DomEvent.on(leftBtn, 'click', e => {
+    L.DomEvent.stopPropagation(e);
+    saveCurrentEchelonState();
+    currentEchelon = currentEchelon <= 1 ? ECHELON_COUNT : currentEchelon - 1;
+    loadEchelonState(currentEchelon);
+    label.textContent = `Эшелон ${currentEchelon}/${ECHELON_COUNT}`;
+  });
+
+  L.DomEvent.on(rightBtn, 'click', e => {
+    L.DomEvent.stopPropagation(e);
+    saveCurrentEchelonState();
+    currentEchelon = currentEchelon >= ECHELON_COUNT ? 1 : currentEchelon + 1;
+    loadEchelonState(currentEchelon);
+    label.textContent = `Эшелон ${currentEchelon}/${ECHELON_COUNT}`;
+  });
+
+  L.DomEvent.on(copyBtn, 'click', e => {
+    L.DomEvent.stopPropagation(e);
+    saveCurrentEchelonState();
+    const next = currentEchelon >= ECHELON_COUNT ? 1 : currentEchelon + 1;
+    echelonStates[next] = JSON.parse(JSON.stringify(echelonStates[currentEchelon]));
+    alert(`Скопировано в эшелон ${next}`);
+  });
+
+  return container;
+};
+
+map.addControl(echelonControl);
 
 // When a new shape is created via Draw, apply current color/weight and add to drawnItems
 map.on(L.Draw.Event.CREATED, function (e) {
@@ -249,16 +347,15 @@ const SimpleSymbols = L.Control.extend({
     container.style.cursor = 'pointer';
     container.style.padding = '4px';
 
-    // === Верхняя панель вкладок ===
+    // Верхняя панель вкладок
     const tabs = L.DomUtil.create('div', '', container);
     tabs.style.display = 'flex';
     tabs.style.justifyContent = 'space-between';
     tabs.style.marginBottom = '4px';
 
-    const tabNames = { unit: 'Боевые', engineer: 'Инженерные', signs: 'Знаки' };
+    const tabNames = { unit: 'Арм', engineer: 'Инж', signs: 'Сим' };
     const menus = {};
 
-    // создаём кнопки вкладок и меню для каждой категории
     for (const key in tabNames) {
       const btn = L.DomUtil.create('a', '', tabs);
       btn.textContent = tabNames[key];
@@ -271,33 +368,46 @@ const SimpleSymbols = L.Control.extend({
       btn.style.border = '1px solid rgba(255,255,255,0.1)';
       btn.style.userSelect = 'none';
 
+      // Меню символов
       const menu = L.DomUtil.create('div', '', container);
-      menu.style.display = 'none';
+      menu.style.display = 'none';               // свернуто по умолчанию
+      menu.classList.add('symbol-menu');     
       menu.style.marginTop = '2px';
-      menu.style.maxHeight = '250px';
-      menu.style.overflowY = 'auto';
       menu.style.background = 'rgba(0,0,0,0.7)';
       menu.style.border = '1px solid rgba(255,255,255,0.1)';
       menu.style.borderRadius = '6px';
-      menu.style.padding = '2px';
+      menu.style.padding = '4px';
+      menu.style.width = '80px';
+      menu.style.gridTemplateColumns = 'repeat(2, 34px)';
+      menu.style.gridAutoRows = '34px';
+      menu.style.gridGap = '4px';
+      menu.style.overflow = 'hidden';
+      menu.style.display = 'none';              // главное — скрыто
+
       menus[key] = menu;
 
+      // Клик по вкладке: показать/скрыть только нужное меню
       btn.addEventListener('click', () => {
         for (const k in menus) {
-          menus[k].style.display = (k === key && menus[k].style.display === 'none') ? 'block' : 'none';
+          if (k === key) {
+            menus[k].style.display = menus[k].style.display === 'none' ? 'grid' : 'none';
+          } else {
+            menus[k].style.display = 'none';
+          }
         }
       });
     }
 
-    // === Добавляем символы в каждое меню ===
+    // Добавляем символы в каждое меню
     for (const category in ICON_CATEGORIES) {
       const menu = menus[category];
+      menu.style.display = 'none'; // по умолчанию скрыто
+
       ICON_CATEGORIES[category].forEach(name => {
         const btn = L.DomUtil.create('a', '', menu);
-        btn.style.display = 'inline-block';
         btn.style.width = '34px';
         btn.style.height = '34px';
-        btn.style.margin = '2px';
+        btn.style.margin = '0';
         btn.style.textAlign = 'center';
         btn.style.verticalAlign = 'middle';
         btn.innerHTML = `<img src="assets/symbols/${name}.png" 
@@ -320,7 +430,6 @@ const SimpleSymbols = L.Control.extend({
 });
 
 map.addControl(new SimpleSymbols({ position: 'topleft' }));
-
 // === addSimpleSymbol с масштабируемыми иконками ===
 function addSimpleSymbol(type, latlng) {
   const color = getDrawColor(); 
@@ -578,14 +687,93 @@ $id('btnFront').addEventListener('click', ()=>{
   // фронт: прямая линия через центр горизонтально
   const b = imageBounds;
   const y = (b[0][0] + b[1][0]) / 2;
-  const left = [y, b[0][1] + (b[1][1]-b[0][1])*0.05];
-  const right = [y, b[1][1] - (b[1][1]-b[0][1])*0.05];
+  const left = [y, b[0][1]];
+  const right = [y, b[1][1]];
   const color = getDrawColor();
   const weight = getDrawWeight();
   const line = L.polyline([left, right], { color, weight }).addTo(drawnItems);
 });
 
+//-------------Сохранение и загрузка состояния эшелона----------
 
+function saveCurrentEchelonState() {
+  echelonStates[currentEchelon] = {
+    markers: markerList.map(m => ({
+      id: m.id,
+      team: m.team,
+      playerIndex: m.playerIndex,
+      nick: m.nick,
+      nation: m.nation,
+      regimentFile: m.regimentFile,
+      latlng: m.marker.getLatLng()
+    })),
+    simple: simpleMarkers.map(m => {
+      const latlng = m.getLatLng ? m.getLatLng() : {lat:0,lng:0};
+      const type = m._symbName || m._simpleType || null;
+      const html = m.getElement ? m.getElement().innerHTML : '';
+      return { latlng, type, html };
+    }),
+    drawings: (() => {
+      const drawings = [];
+      drawnItems.eachLayer(layer=>{
+        try{
+          if(layer instanceof L.Polyline && !(layer instanceof L.Polygon)){
+            drawings.push({type:'polyline', latlngs: layer.getLatLngs().map(p=>({lat:p.lat,lng:p.lng})), options: pickLayerOptions(layer)});
+          } else if(layer instanceof L.Polygon){
+            const rings = layer.getLatLngs();
+            const latlngs = Array.isArray(rings[0]) ? rings[0].map(p=>({lat:p.lat,lng:p.lng})) : rings.map(p=>({lat:p.lat,lng:p.lng}));
+            drawings.push({type:'polygon', latlngs, options: pickLayerOptions(layer)});
+          } else if(layer instanceof L.Circle){
+            drawings.push({type:'circle', center: layer.getLatLng(), radius: layer.getRadius(), options: pickLayerOptions(layer)});
+          }
+        } catch(e){console.warn('serialize drawing error', e);}
+      });
+      return drawings;
+    })()
+  };
+}
+
+function loadEchelonState(echelon) {
+  if(!echelonStates[echelon]) return;
+  const state = echelonStates[echelon];
+
+  // очистить текущее
+  drawnItems.clearLayers();
+  markerList.forEach(m => { try { map.removeLayer(m.marker); } catch(e){} });
+  markerList = [];
+  simpleMarkers.forEach(m => { try { map.removeLayer(m); } catch(e){} });
+  simpleMarkers = [];
+
+  // восстановить
+  (state.markers||[]).forEach(m=>{
+    const pos = m.latlng || {lat:0,lng:0};
+    const marker = L.marker([pos.lat,pos.lng], { icon:createRegDivIcon(m.nick,m.nation,m.regimentFile,m.team), draggable:true }).addTo(map);
+    markerList.push({...m, marker});
+  });
+
+  (state.simple||[]).forEach(s=>{
+    const latlng = s.latlng || {lat:0,lng:0};
+    let marker;
+    if(s.type && ICON_NAMES.includes(s.type)){
+      marker = addCustomIcon(`assets/symbols/${s.type}.png`, latlng);
+      marker._symbName = s.type;
+    } else {
+      marker = L.marker([latlng.lat, latlng.lng], {
+        icon: L.divIcon({ html: s.html || '', className: 'symbol-marker' }),
+        draggable: true
+      }).addTo(map);
+    }
+    simpleMarkers.push(marker);
+  });
+
+  (state.drawings||[]).forEach(d=>{
+    try{
+      if(d.type==='polyline') L.polyline(d.latlngs.map(p=>[p.lat,p.lng]), d.options||{}).addTo(drawnItems);
+      else if(d.type==='polygon') L.polygon(d.latlngs.map(p=>[p.lat,p.lng]), d.options||{}).addTo(drawnItems);
+      else if(d.type==='circle') L.circle([d.center.lat,d.center.lng], { radius:d.radius, ...(d.options||{}) }).addTo(drawnItems);
+    } catch(e){console.warn('Ошибка восстановления рисунка:',e);}
+  });
+}
 
 //------------ Ластик и очистка ------------
 $id('btnEraser').addEventListener('click', ()=>{
@@ -610,137 +798,94 @@ $id('drawWeight').addEventListener('input', (e)=>{
   $id('weightVal').textContent = e.target.value;
 });
 
-// ------------ Сохранение плана в JSON ------------
-// ------------ Сохранение плана в JSON (исправлено) ------------
-function pickLayerOptions(layer){
-  if(!layer || !layer.options) return {};
-  const opts = {};
-  ['color','weight','fillColor','fillOpacity','radius'].forEach(k=>{
-    if(layer.options[k]!==undefined) opts[k] = layer.options[k];
-  });
-  return opts;
-}
+// ------------ Сохранение плана в JSON (обновлено с учётом эшелонов) ------------
+$id('btnSave').addEventListener('click', () => {
+  if (!currentMapFile && !confirm('Карта не загружена. Сохранить план без карты?')) return;
 
-$id('btnSave').addEventListener('click', ()=> {
-  if(!currentMapFile && !confirm('Карта не загружена. Сохранить план без карты?')) return;
-
-  // игроки
-  const markers = markerList.map(m=>({
-    id: m.id,
-    team: m.team,
-    playerIndex: m.playerIndex,
-    nick: m.nick,
-    nation: m.nation,
-    regimentFile: m.regimentFile,
-    latlng: m.marker.getLatLng()
-  }));
-
-  // простые символы (AddSimpleSymbol + custom)
-  const simple = simpleMarkers.map(m=>{
-    const latlng = m.getLatLng ? m.getLatLng() : {lat:0,lng:0};
-    const type = m._symbName || m._simpleType || null; // type для AddSimpleSymbol
-    const html = m.getElement ? m.getElement().innerHTML : '';
-    return { latlng, type, html };
-  });
-
-  // рисунки
-  const drawings = [];
-  drawnItems.eachLayer(layer=>{
-    try{
-      if(layer instanceof L.Polyline && !(layer instanceof L.Polygon)){
-        drawings.push({type:'polyline', latlngs: layer.getLatLngs().map(p=>({lat:p.lat,lng:p.lng})), options: pickLayerOptions(layer)});
-      } else if(layer instanceof L.Polygon){
-        const rings = layer.getLatLngs();
-        const latlngs = Array.isArray(rings[0]) ? rings[0].map(p=>({lat:p.lat,lng:p.lng})) : rings.map(p=>({lat:p.lat,lng:p.lng}));
-        drawings.push({type:'polygon', latlngs, options: pickLayerOptions(layer)});
-      } else if(layer instanceof L.Circle){
-        drawings.push({type:'circle', center: layer.getLatLng(), radius: layer.getRadius(), options: pickLayerOptions(layer)});
-      }
-    } catch(e){console.warn('serialize drawing error', e);}
-  });
+  // Перед сохранением актуализируем текущий эшелон
+  saveCurrentEchelonState();
 
   const plan = {
-    meta: { createdAt: new Date().toISOString(), mapFile: currentMapFile || null },
-    markers,
-    simple,
-    drawings,
+    meta: {
+      createdAt: new Date().toISOString(),
+      mapFile: currentMapFile || null,
+      echelonCount: ECHELON_COUNT
+    },
+    echelons: {},
     mapState: { center: map.getCenter(), zoom: map.getZoom() }
   };
 
-  const blob = new Blob([JSON.stringify(plan,null,2)], {type:'application/json'});
+  // Сохраняем данные по каждому эшелону
+  for (let e = 1; e <= ECHELON_COUNT; e++) {
+    const state = echelonStates[e];
+    if (!state) continue;
+
+    plan.echelons[e] = {
+      markers: state.markers || [],
+      simple: state.simple || [],
+      drawings: state.drawings || []
+    };
+  }
+
+  const blob = new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (currentMapFile||'plan').replace(/\.[^/.]+$/,'')+'_plan.json';
+  a.download = (currentMapFile || 'plan').replace(/\.[^/.]+$/, '') + '_plan.json';
   a.click();
   URL.revokeObjectURL(a.href);
 });
 
-// ------------ Загрузка плана из JSON (исправлено) ------------
-function loadPlanData(plan){
-  if(!plan) return;
 
-  // очистка
-  drawnItems.clearLayers();
-  markerList.forEach(m=>{ try{ map.removeLayer(m.marker) }catch(e){} });
-  markerList = [];
-  simpleMarkers.forEach(m=>{ try{ map.removeLayer(m) }catch(e){} });
-  simpleMarkers = [];
+// ------------ Загрузка плана из JSON (обновлено с учётом эшелонов) ------------
+function loadPlanData(plan) {
+  if (!plan) return;
 
   const mapFile = plan.meta?.mapFile || 'map1.jpg';
-  if(mapSelect) mapSelect.value = mapFile;
+  if (mapSelect) mapSelect.value = mapFile;
 
-  loadMapByFile(mapFile).then(()=>{
-    // маркеры игроков
-    (plan.markers||[]).forEach(m=>{
-      const pos = m.latlng || {lat:0,lng:0};
-      const marker = L.marker([pos.lat,pos.lng], { icon:createRegDivIcon(m.nick,m.nation,m.regimentFile,m.team), draggable:true }).addTo(map);
-      markerList.push({...m, marker});
-    });
+  loadMapByFile(mapFile).then(() => {
+    // Если план содержит эшелоны
+    if (plan.echelons) {
+      // Восстанавливаем все эшелоны
+      for (let e = 1; e <= (plan.meta?.echelonCount || 3); e++) {
+        const state = plan.echelons[e];
+        if (!state) continue;
+        echelonStates[e] = {
+          markers: (state.markers || []).map(m => ({
+            ...m,
+            marker: null // создадим позже при активации эшелона
+          })),
+          simple: state.simple || [],
+          drawings: state.drawings || []
+        };
+      }
 
-    // простые символы
-    // простые символы
-(plan.simple||[]).forEach(s => {
-  const latlng = s.latlng || {lat:0,lng:0};
-  let marker;
+      // Загружаем первый эшелон по умолчанию
+      currentEchelon = 1;
+      loadEchelonState(currentEchelon);
+    } else {
+      // Старые планы без эшелонов — грузим как один общий эшелон
+      echelonStates = {
+        1: {
+          markers: plan.markers || [],
+          simple: plan.simple || [],
+          drawings: plan.drawings || []
+        },
+        2: { markers: [], simple: [], drawings: [] },
+        3: { markers: [], simple: [], drawings: [] }
+      };
+      currentEchelon = 1;
+      loadEchelonState(1);
+    }
 
-  if(s.type && ICON_NAMES.includes(s.type)){
-    // AddCustomSymbol с сохранённым _symbName
-    marker = addCustomIcon(`assets/symbols/${s.type}.png`, latlng);
-    marker._symbName = s.type;
-  } else {
-    // AddSimpleSymbol (dot, x, arrow, triangle, diamond, skull, cross)
-    marker = L.marker([latlng.lat, latlng.lng], {
-      icon: L.divIcon({
-        html: s.html || '',
-        className: 'symbol-marker'
-      }),
-      draggable: true
-    }).addTo(map);
-
-    // сохраняем тип для восстановления при сохранении
-    if(s._simpleType) marker._simpleType = s._simpleType;
-  }
-
-  simpleMarkers.push(marker);
-});
-
-
-    // рисунки
-    (plan.drawings||[]).forEach(d=>{
-      try{
-        if(d.type==='polyline') L.polyline(d.latlngs.map(p=>[p.lat,p.lng]), d.options||{}).addTo(drawnItems);
-        else if(d.type==='polygon') L.polygon(d.latlngs.map(p=>[p.lat,p.lng]), d.options||{}).addTo(drawnItems);
-        else if(d.type==='circle') L.circle([d.center.lat,d.center.lng], { radius:d.radius, ...(d.options||{}) }).addTo(drawnItems);
-      } catch(e){console.warn('Ошибка восстановления рисунка:',e);}
-    });
-
-    // восстановление позиции карты
-    if(plan.mapState && plan.mapState.center && plan.mapState.zoom) map.setView(plan.mapState.center, plan.mapState.zoom);
+    // Восстанавливаем позицию карты
+    if (plan.mapState && plan.mapState.center && plan.mapState.zoom)
+      map.setView(plan.mapState.center, plan.mapState.zoom);
 
     alert('✅ План успешно загружен!');
-  }).catch(err=>{
+  }).catch(err => {
     console.error('Ошибка при загрузке карты:', err);
-    alert('Ошибка при загрузке карты/плана: '+(err.message||err));
+    alert('Ошибка при загрузке карты/плана: ' + (err.message || err));
   });
 }
 
