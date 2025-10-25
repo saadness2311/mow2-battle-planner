@@ -1041,39 +1041,3 @@ function saveMapAsScreenshot() {
 
 // Привязка к кнопке
 document.getElementById('btnSaveImage').addEventListener('click', saveMapAsScreenshot);
-
-// === МНОГОПОЛЬЗОВАТЕЛЬСКИЙ РЕЖИМ (СИНХРОНИЗАЦИЯ) ===
-const processedEntities = new Set(); // Защита от дубликатов
-
-window.addEventListener('remoteEntityAdded', (e) => {
-  const entity = e.detail.entity;
-  const key = entity.id;
-  if (processedEntities.has(key)) return;
-  processedEntities.add(key);
-
-  // Добавляем entity
-  if (entity.type === 'player_marker') {
-    const data = entity.data;
-    const icon = createRegDivIcon(data.nick, data.nation, data.regimentFile, data.team);
-    const marker = L.marker(data.latlng, { icon, draggable: true }).addTo(map);
-    marker.on('dragend', () => {
-      firebaseUpdateEntity(entity.id, { latlng: marker.getLatLng() });
-    });
-    markerList.push({ ...data, marker });
-  } // Добавь для simple и drawings
-});
-
-window.addEventListener('remoteEntityChanged', (e) => {
-  const entity = e.detail.entity;
-  const existing = markerList.find(m => m.id === entity.id);
-  if (existing) existing.marker.setLatLng(entity.data.latlng);
-});
-
-window.addEventListener('remoteEntityRemoved', (e) => {
-  const id = e.detail.id;
-  const index = markerList.findIndex(m => m.id === id);
-  if (index !== -1) {
-    map.removeLayer(markerList[index].marker);
-    markerList.splice(index, 1);
-  }
-});
