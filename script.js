@@ -6,217 +6,23 @@ function generateEntityId(prefix='e') {
   return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8);
 }
 
-// Helper wrappers for Firebase (теперь с echelon)
-window.firebaseCreateEntity = window.firebaseCreateEntity || function(entity, echelon){ /* no-op until firebase initialized */ };
-window.firebaseUpdateEntity = window.firebaseUpdateEntity || function(id, data, echelon){ /* no-op */ };
-window.firebaseDeleteEntity = window.firebaseDeleteEntity || function(id, echelon){ /* no-op */ };
+// Helper wrappers for Firebase (implemented in firebase-sync.js if enabled)
+window.firebaseCreateEntity = window.firebaseCreateEntity || function(entity){ /* no-op until firebase initialized */ };
+window.firebaseUpdateEntity = window.firebaseUpdateEntity || function(id, data){ /* no-op */ };
+window.firebaseDeleteEntity = window.firebaseDeleteEntity || function(id){ /* no-op */ };
 
-// --- Многопользовательская синхронизация (улучшенная версия) ---
-let syncEnabled = false;
-let entityStore = {}; // {echelon: {id: {data, localUpdatedAt, layer}}}
-let dragDebounceTimers = {};
-
-// Debounce функция для drag и edit
-function debounce(fn, ms, key) {
-  return function(...args) {
-    clearTimeout(dragDebounceTimers[key]);
-    dragDebounceTimers[key] = setTimeout(() => fn(...args), ms);
-  };
-}
-
-// Получить состояние текущего эшелона
-function getCurrentEchelonState() {
-  if (!entityStore[currentEchelon]) {
-    entityStore[currentEchelon] = {};
-  }
-  return entityStore[currentEchelon];
-}
-
-// Применить remote entity (с проверкой конфликтов по timestamp)
-function applyRemoteEntity(entity) {
-  if (!syncEnabled || entity.echelon !== currentEchelon) return;
-  const state = getCurrentEchelonState();
-  const existing = state[entity.id];
-  
-  // Игнорируем, если локальная версия новее (last-write-wins)
-  if (existing && existing.localUpdatedAt >= entity.updatedAt) {
-    console.log('IGNORED remote (local newer):', entity.id);
-    return;
-  }
-  
-  // Обновляем store
-  state[entity.id] = {
-    data: entity.data,
-    remoteUpdatedAt: entity.updatedAt,
-    layer: null // будет установлен ниже
-  };
-  
-  // Удаляем старый layer, если есть
-  if (existing?.layer) {
-    if (existing.layer instanceof L.LayerGroup) {
-      existing.layer.clearLayers();
-    } else {
-      map.removeLayer(existing.layer);
-    }
-  }
-  
-  // Создаём новый layer
-  createLayerFromEntity(entity);
-  console.log('APPLIED remote entity:', entity.id, entity.type);
-}
-
-// Создать Leaflet layer из entity данных
-function createLayerFromEntity(entity) {
-  const state = getCurrentEchelonState();
-  let layer;
-  
-  try {
-    const data = entity.data;
-    switch (entity.type) {
-      case 'player_marker':
-        const icon = createRegDivIcon(data.ownerNick, data.nation, data.regimentFile, data.team);
-        layer = L.marker(data.latlng, { icon, draggable: true }).addTo(map);
-        
-        // Drag sync (debounce 250ms)
-        layer.on('dragend', debounce(() => {
-          const newLatLng = layer.getLatLng();
-          firebaseUpdateEntity(entity.id, { latlng: newLatLng }, currentEchelon);
-          // Обновляем local timestamp
-          state[entity.id].localUpdatedAt = Date.now();
-        }, 250, `drag_${entity.id}`));
-        
-        // Удаление по правой кнопке
-        layer.on('contextmenu', (e) => {
-          L.DomEvent.preventDefault(e);
-          if (confirm('Удалить маркер игрока?')) {
-            firebaseDeleteEntity(entity.id, currentEchelon);
-          }
-        });
-        
-        // Добавляем в markerList
-        const entry = { id: entity.id, team: data.team, playerIndex: data.playerIndex, nick: data.ownerNick, nation: data.nation, regimentFile: data.regimentFile, marker: layer };
-        markerList.push(entry);
-        break;
-        
-      case 'simple_symbol':
-        if (data.symbName && ICON_NAMES.includes(data.symbName)) {
-          layer = addCustomIcon(`assets/symbols/${data.symbName}.png`, data.latlng);
-        } else {
-          layer = addSimpleSymbol(data.simpleType, data.latlng);
-        }
-        layer.entityId = entity.id;
-        layer.entityType = 'simple_symbol';
-        
-        // Drag sync
-        layer.on('dragend', debounce(() => {
-          firebaseUpdateEntity(entity.id, { latlng: layer.getLatLng() }, currentEchelon);
-          state[entity.id].localUpdatedAt = Date.now();
-        }, 250, `drag_${entity.id}`));
-        
-        // Удаление
-        layer.on('contextmenu', (e) => {
-          L.DomEvent.preventDefault(e);
-          if (confirm('Удалить символ?')) {
-            map.removeLayer(layer);
-            simpleMarkers = simpleMarkers.filter(m => m !== layer);
-            firebaseDeleteEntity(entity.id, currentEchelon);
-          }
-        });
-        
-        simpleMarkers.push(layer);
-        break;
-        
-      case 'drawing':
-        layer = L.geoJSON(data.geojson, {
-          style: (feature) => feature.properties || {}
-        }).addTo(drawnItems);
-        
-        layer.entityId = entity.id;
-        layer.entityType = 'drawing';
-        
-        // Edit sync (debounce 500ms)
-        layer.on('edit', debounce(() => {
-          const newGeojson = layer.toGeoJSON();
-          newGeojson.properties = pickLayerOptions(layer);
-          firebaseUpdateEntity(entity.id, { geojson: newGeojson }, currentEchelon);
-          state[entity.id].localUpdatedAt = Date.now();
-        }, 500, `edit_${entity.id}`));
-        break;
-    }
-    
-    if (layer) {
-      state[entity.id].layer = layer;
-      layer.entityId = entity.id;
-      layer.entityType = entity.type;
-    }
-  } catch (e) {
-    console.error('Error creating layer from entity:', e);
-  }
-}
-
-// --- Remote event handlers (БЕЗОПАСНЫЕ, С ЭШЕЛОНАМИ, БЕЗ ЦИКЛОВ) ---
-const processedEntities = new Set(); // Защита от дублирования
-
-window.addEventListener('remoteEntityAdded', (e) => {
-  const { entity, echelonId = 'default' } = e.detail;
-  if (!entity || !entity.id) return;
-
-  const key = `${echelonId}_${entity.id}`;
-  if (processedEntities.has(key)) return;
-  processedEntities.add(key);
-
-  // Сохраняем echelonId в entity, если его нет
-  entity.echelonId = echelonId;
-
-  applyRemoteEntity(entity);
-  console.log('ADDED remote entity:', entity.id, 'echelon:', echelonId);
+// Handlers for remote events (fired by firebase-sync.js)
+window.addEventListener('remoteEntityAdded', (e)=> {
+  // payload: { entity }
+  // if entity already exists locally, ignore. Firebase sync will push updates.
 });
-
-window.addEventListener('remoteEntityChanged', (e) => {
-  const { entity, echelonId = 'default' } = e.detail;
-  if (!entity || !entity.id) return;
-
-  entity.echelonId = echelonId;
-  applyRemoteEntity(entity);
-  console.log('CHANGED remote entity:', entity.id, 'echelon:', echelonId);
+window.addEventListener('remoteEntityChanged', (e)=> {
+  // payload: { entity }
 });
-
-window.addEventListener('remoteEntityRemoved', (e) => {
-  const { id, echelonId = 'default' } = e.detail;
-  const key = `${echelonId}_${id}`;
-  processedEntities.delete(key);
-
-  const state = getCurrentEchelonState();
-  const item = state[id];
-  if (item?.layer) {
-    if (item.layer instanceof L.LayerGroup) {
-      item.layer.clearLayers();
-    } else {
-      map.removeLayer(item.layer);
-    }
-  }
-  delete state[id];
-
-  // Очистка из списков
-  markerList = markerList.filter(m => m.id !== id);
-  simpleMarkers = simpleMarkers.filter(m => m.entityId !== id);
-
-  console.log('REMOVED remote entity:', id, 'echelon:', echelonId);
+window.addEventListener('remoteEntityRemoved', (e)=> {
+  // payload: { id }
 });
-
-window.addEventListener('remoteRoomLeft', () => {
-  syncEnabled = false;
-  entityStore = {};
-  processedEntities.clear();
-  console.log('Left room - sync disabled');
-});
-
-window.addEventListener('remoteParticipants', (e) => {
-  syncEnabled = true;
-  console.log('Room joined - sync enabled. Participants:', Object.keys(e.detail.participants).length);
-});
-
-// ------------ Конфигурация ------------ 
+// ------------ Конфигурация ------------
 const MAP_COUNT = 25; // теперь map1..map25
 const MAP_FILE_PREFIX = "map"; // map1.jpg
 const MAP_FOLDER = "assets/maps/";
@@ -429,6 +235,8 @@ let echelonStates = {
 // Контейнеры для маркеров/символов
 let markerList = []; // {id, team, playerIndex, nick, nation, regimentFile, marker}
 let simpleMarkers = []; // symbols from SimpleSymbols or others
+// keep track of player markers separately for easier removal
+// (we're using markerList as canonical list)
 
 // ------------ Draw control: ensure color/weight are applied ------------
 function getDrawColor(){ return $id('drawColor') ? $id('drawColor').value : '#ff0000'; }
@@ -525,7 +333,7 @@ echelonControl.onAdd = function(map) {
 
 map.addControl(echelonControl);
 
-// When a new shape is created via Draw, apply current color/weight and add to drawnItems + SYNC
+// When a new shape is created via Draw, apply current color/weight and add to drawnItems
 map.on(L.Draw.Event.CREATED, function (e) {
   const layer = e.layer;
   // apply style for polylines / polygons / circle
@@ -543,49 +351,14 @@ map.on(L.Draw.Event.CREATED, function (e) {
     layer.setStyle && layer.setStyle({ color: getDrawColor(), weight: getDrawWeight() });
   }
   drawnItems.addLayer(layer);
-
-  // SYNC: Создаём entity для Firebase
-  const id = generateEntityId('draw');
-  const geojson = layer.toGeoJSON();
-  geojson.properties = pickLayerOptions(layer);
-
-  const entity = {
-    id: id,
-    type: 'drawing',
-    data: { geojson },
-    updatedAt: Date.now(),
-    echelon: currentEchelon
-  };
-
-  try {
-    firebaseCreateEntity(entity, currentEchelon);
-    getCurrentEchelonState()[id] = { data: entity.data, localUpdatedAt: entity.updatedAt, layer: layer };
-    layer.entityId = id;
-    layer.entityType = 'drawing';
-  } catch (e) {
-    console.warn('Firebase create drawing error:', e);
-  }
-
-  // Edit handler for sync
-  layer.on('edit', debounce(() => {
-    const newGeojson = layer.toGeoJSON();
-    newGeojson.properties = pickLayerOptions(layer);
-    firebaseUpdateEntity(id, { geojson: newGeojson }, currentEchelon);
-    getCurrentEchelonState()[id].localUpdatedAt = Date.now();
-  }, 500, `edit_${id}`));
 });
 
-// Ensure edits keep styles intact
+// Ensure edits keep styles intact (nothing special needed, but keep handler)
 map.on(L.Draw.Event.EDITED, function (e) {
   // no-op - layers are already in drawnItems
-  // Sync уже в layer.on('edit')
 });
 map.on(L.Draw.Event.DELETED, function (e) {
-  e.layers.eachLayer(layer => {
-    if (layer.entityId) {
-      firebaseDeleteEntity(layer.entityId, currentEchelon);
-    }
-  });
+  // no-op
 });
 
 // === SimpleSymbols с тремя вкладками ===
@@ -680,8 +453,7 @@ const SimpleSymbols = L.Control.extend({
 });
 
 map.addControl(new SimpleSymbols({ position: 'topleft' }));
-
-// === addSimpleSymbol с масштабируемыми иконками + SYNC ===
+// === addSimpleSymbol с масштабируемыми иконками ===
 function addSimpleSymbol(type, latlng) {
   const color = getDrawColor(); 
   const size = 60;
@@ -707,37 +479,26 @@ function addSimpleSymbol(type, latlng) {
     draggable: true
   }).addTo(map);
 
-  // SYNC: Assign ID and send to Firebase
-  const id = generateEntityId('sym');
-  marker.entityId = id;
+  // assign entity id for realtime sync
+  marker.entityId = generateEntityId('sym');
+  // expose minimal data for other code
   marker.entityType = 'simple_symbol';
-  marker._simpleType = type; // для сохранения
+  // push to firebase if available
+  try { window.firebaseCreateEntity && window.firebaseCreateEntity({
+    id: marker.entityId,
+    type: marker.entityType,
+    simpleType: type,
+    latlng: marker.getLatLng()
+  }); } catch(e){ console.warn('firebaseCreateEntity error', e); }
 
-  const entity = {
-    id: id,
-    type: 'simple_symbol',
-    data: { simpleType: type, latlng: marker.getLatLng() },
-    updatedAt: Date.now(),
-    echelon: currentEchelon
-  };
-
-  try {
-    firebaseCreateEntity(entity, currentEchelon);
-    getCurrentEchelonState()[id] = { data: entity.data, localUpdatedAt: entity.updatedAt, layer: marker };
-  } catch(e) { console.warn('firebaseCreateEntity error', e); }
-
-  // Drag sync
-  marker.on('dragend', debounce(() => {
-    firebaseUpdateEntity(id, { latlng: marker.getLatLng() }, currentEchelon);
-    getCurrentEchelonState()[id].localUpdatedAt = Date.now();
-  }, 250, `drag_${id}`));
+  // НЕ добавляем tooltip для простых символов
+  marker._simpleType = type; // чтобы при сохранении/загрузке восстановить тип
 
   marker.on('click', () => {
     if(confirm('Удалить этот символ?')){
       map.removeLayer(marker);
       const idx = simpleMarkers.indexOf(marker);
       if(idx!==-1) simpleMarkers.splice(idx,1);
-      firebaseDeleteEntity(id, currentEchelon);
     }
   });
 
@@ -753,11 +514,6 @@ function addCustomIcon(url, latlng) {
     }),
     draggable: true
   }).addTo(map);
-
-  // SYNC: Assign ID and send
-  const id = generateEntityId('sym');
-  marker.entityId = id;
-  marker.entityType = 'simple_symbol';
 
   try {
     const file = String(url).split('/').pop() || '';
@@ -775,31 +531,13 @@ function addCustomIcon(url, latlng) {
         className: 'symb-tooltip'
       });
     }
-
-    const entity = {
-      id: id,
-      type: 'simple_symbol',
-      data: { symbName: key, latlng: marker.getLatLng() },
-      updatedAt: Date.now(),
-      echelon: currentEchelon
-    };
-
-    firebaseCreateEntity(entity, currentEchelon);
-    getCurrentEchelonState()[id] = { data: entity.data, localUpdatedAt: entity.updatedAt, layer: marker };
   } catch (e) { console.warn('tooltip bind error', e); }
-
-  // Drag sync
-  marker.on('dragend', debounce(() => {
-    firebaseUpdateEntity(id, { latlng: marker.getLatLng() }, currentEchelon);
-    getCurrentEchelonState()[id].localUpdatedAt = Date.now();
-  }, 250, `drag_${id}`));
 
   marker.on('click', () => {
     if (confirm('Удалить этот символ?')) {
       map.removeLayer(marker);
       const idx = simpleMarkers.indexOf(marker);
       if (idx !== -1) simpleMarkers.splice(idx, 1);
-      firebaseDeleteEntity(id, currentEchelon);
     }
   });
 
@@ -927,7 +665,7 @@ for(let i=1;i<=5;i++){
   BLUE_PLAYERS.appendChild(makePlayerRow('blue', i));
 }
 
-//------------ Управление маркерами + SYNC ------------
+//------------ Управление маркерами ------------
 function generateMarkerId(team, idx){ return `${team}-${idx}`; }
 
 // создаём divIcon с <img onerror=...> чтобы показывать заглушку если не нашлось
@@ -954,7 +692,6 @@ function createRegDivIcon(nick, nation, regimentFile, team) {
     iconAnchor: [Math.round(size / 2), Math.round(size / 2)],
   });
 }
-
 function placeMarker(nick, nation, regimentFile, team, playerIndex){
   const id = generateMarkerId(team, playerIndex);
 
@@ -963,8 +700,6 @@ function placeMarker(nick, nation, regimentFile, team, playerIndex){
   if (existingIndex !== -1) {
     try { map.removeLayer(markerList[existingIndex].marker); } catch(e){}
     markerList.splice(existingIndex, 1);
-    // Удаляем из store
-    delete getCurrentEchelonState()[id];
   }
 
   // позиция: центр карты (или центр изображения)
@@ -972,30 +707,17 @@ function placeMarker(nick, nation, regimentFile, team, playerIndex){
   const icon = createRegDivIcon(nick, nation, regimentFile, team);
   const marker = L.marker(pos, { icon, draggable: true }).addTo(map);
 
-  // SYNC: Assign ID and handlers
-  marker.entityId = id;
+  // не добавляем tooltip (как ты попросил удалить)
+  marker.on('dragend', ()=> {
+    try{ window.firebaseUpdateEntity && window.firebaseUpdateEntity(marker.entityId, { latlng: marker.getLatLng() }); }catch(e){console.warn(e)}
+  });
+
+  
+  // assign entity id for this player marker
+  marker.entityId = id; // use generated id from generateMarkerId
   marker.entityType = 'player_marker';
-
-  marker.on('dragend', debounce(() => {
-    const newLatLng = marker.getLatLng();
-    firebaseUpdateEntity(id, { latlng: newLatLng }, currentEchelon);
-    getCurrentEchelonState()[id].localUpdatedAt = Date.now();
-  }, 250, `drag_${id}`));
-
-  const entity = {
-    id: id,
-    type: 'player_marker',
-    data: { ownerNick: nick, nation, regimentFile, team, playerIndex, latlng: pos },
-    updatedAt: Date.now(),
-    echelon: currentEchelon
-  };
-
-  try {
-    firebaseCreateEntity(entity, currentEchelon);
-    getCurrentEchelonState()[id] = { data: entity.data, localUpdatedAt: entity.updatedAt, layer: marker };
-  } catch(e) { console.warn(e); }
-
-  const entry = { id, team, playerIndex, nick, nation, regimentFile, marker };
+  try{ window.firebaseCreateEntity && window.firebaseCreateEntity({ id: marker.entityId, type: marker.entityType, ownerNick: nick, team, playerIndex, latlng: marker.getLatLng() }); }catch(e){console.warn(e)}
+const entry = { id, team, playerIndex, nick, nation, regimentFile, marker };
   markerList.push(entry);
 }
 
@@ -1010,8 +732,6 @@ $id('btnFront').addEventListener('click', ()=>{
   const color = getDrawColor();
   const weight = getDrawWeight();
   const line = L.polyline([left, right], { color, weight }).addTo(drawnItems);
-  
-  // SYNC: Автоматически добавляется через draw:created
 });
 
 //-------------Сохранение и загрузка состояния эшелона----------
@@ -1057,19 +777,17 @@ function loadEchelonState(echelon) {
   if(!echelonStates[echelon]) return;
   const state = echelonStates[echelon];
 
-  // очистить текущее (но сохраняем entityStore для sync)
+  // очистить текущее
   drawnItems.clearLayers();
   markerList.forEach(m => { try { map.removeLayer(m.marker); } catch(e){} });
   markerList = [];
   simpleMarkers.forEach(m => { try { map.removeLayer(m); } catch(e){} });
   simpleMarkers = [];
 
-  // восстановить (sync handlers добавятся автоматически)
+  // восстановить
   (state.markers||[]).forEach(m=>{
     const pos = m.latlng || {lat:0,lng:0};
     const marker = L.marker([pos.lat,pos.lng], { icon:createRegDivIcon(m.nick,m.nation,m.regimentFile,m.team), draggable:true }).addTo(map);
-    marker.entityId = m.id;
-    marker.entityType = 'player_marker';
     markerList.push({...m, marker});
   });
 
@@ -1101,14 +819,6 @@ function loadEchelonState(echelon) {
 $id('btnEraser').addEventListener('click', ()=>{
   if(!confirm('Удалить ВСЕ рисунки на карте?')) return;
   drawnItems.clearLayers();
-  // SYNC: Удаляем все drawing entities
-  const state = getCurrentEchelonState();
-  Object.keys(state).forEach(id => {
-    if (state[id].entityType === 'drawing') {
-      firebaseDeleteEntity(id, currentEchelon);
-      delete state[id];
-    }
-  });
 });
 
 $id('btnClearAll').addEventListener('click', ()=>{
@@ -1121,13 +831,6 @@ $id('btnClearAll').addEventListener('click', ()=>{
   simpleMarkers = [];
   // удалить рисунки
   drawnItems.clearLayers();
-  
-  // SYNC: Удаляем все entities
-  const state = getCurrentEchelonState();
-  Object.keys(state).forEach(id => {
-    firebaseDeleteEntity(id, currentEchelon);
-  });
-  entityStore[currentEchelon] = {};
 });
 
 //------------ Полоса толщины (связываем с UI) ------------
@@ -1278,7 +981,6 @@ $id('btnFillLower').addEventListener('click', () => {
     fillColor: color,
     fillOpacity: 0.10
   }).addTo(drawnItems);
-  // SYNC: Автоматически через draw:created
 });
 
 let assaultTimer = null;
@@ -1379,29 +1081,3 @@ function saveMapAsScreenshot() {
 
 // Привязка к кнопке
 document.getElementById('btnSaveImage').addEventListener('click', saveMapAsScreenshot);
-
-window.addEventListener('remoteEntityAdded', (e)=> {
-  const entity = e.detail.entity;
-  // Создаём маркер из entity (пример для player_marker)
-  if (entity.type === 'player_marker') {
-    const data = entity.data;
-    const marker = L.marker(data.latlng, { icon: createRegDivIcon(data.ownerNick, data.nation, data.regimentFile, data.team), draggable: true }).addTo(map);
-    marker.on('dragend', () => firebaseUpdateEntity(entity.id, { latlng: marker.getLatLng() }));
-    markerList.push({ id: entity.id, ...data, marker });
-  } // Добавь для simple_symbol и drawing аналогично
-});
-window.addEventListener('remoteEntityChanged', (e)=> {
-  const entity = e.detail.entity;
-  const existing = markerList.find(m => m.id === entity.id);
-  if (existing) existing.marker.setLatLng(entity.data.latlng);
-  // Аналогично для simpleMarkers и drawnItems
-});
-window.addEventListener('remoteEntityRemoved', (e)=> {
-  const id = e.detail.id;
-  const existingIndex = markerList.findIndex(m => m.id === id);
-  if (existingIndex !== -1) {
-    map.removeLayer(markerList[existingIndex].marker);
-    markerList.splice(existingIndex, 1);
-  }
-  // Аналогично для simpleMarkers и drawnItems
-});
