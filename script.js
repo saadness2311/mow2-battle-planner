@@ -1,244 +1,222 @@
+// script.js
 
-// script_translated.js
-// Translations-enabled version of the original script.js
-// Language switcher (ru / en) and translated label objects added.
 
-(function(){
-/* ------------------ Language / i18n ------------------ */
-let currentLang = localStorage.getItem('mow2_lang') || 'ru';
-
-const UI_TRANSLATIONS = {
-  langButton_ru: { ru: '🇷🇺 Русский', en: '🇷🇺 Russian' },
-  langButton_en: { ru: '🇬🇧 Английский', en: '🇬🇧 English' },
-
-  selectMapLabel: { ru: 'Выберите карту:', en: 'Select map:' },
-  loadMapBtn: { ru: 'Загрузить карту', en: 'Load map' },
-  resetMapBtn: { ru: 'Сбросить карту', en: 'Reset map' },
-
-  teamsTitle: { ru: 'Команды', en: 'Teams' },
-  blueTeam: { ru: 'Синие', en: 'Blue' },
-  redTeam: { ru: 'Красные', en: 'Red' },
-
-  drawToolsTitle: { ru: 'Инструменты рисования', en: 'Drawing tools' },
-  colorLabel: { ru: 'Цвет:', en: 'Color:' },
-  thicknessLabel: { ru: 'Толщина:', en: 'Thickness:' },
-  frontLineBtn: { ru: 'Нанести линию фронта', en: 'Draw front line' },
-  enemyZoneBtn: { ru: 'Нанести область противника', en: 'Fill enemy area' },
-  enemyAssaultBtn: { ru: 'Наступление противника', en: "Enemy assault" },
-  eraseFrontBtn: { ru: 'Очистить фронт', en: 'Erase front' },
-  clearAllBtn: { ru: 'Очистить карту', en: 'Clear map' },
-  savePlanBtn: { ru: 'Сохранить план', en: 'Save plan' },
-  saveImageBtn: { ru: 'Сохранить карту как .jpg', en: 'Save map as .jpg' },
-  loadPlanBtn: { ru: 'Загрузить план', en: 'Load plan' },
-  noteText: { ru: 'Инструменты рисования находятся на панели карты. Нужно нажимать "edit" и менять линию фронта. Нужно сохранять изменения "save". Автор — saadness', en: 'Drawing tools are on the map panel. Press "edit" to modify front lines. Save changes with "save". Author — saadness' },
-
-  chooseMapAlert: { ru: 'Выберите карту в списке.', en: 'Please select a map from the list.' },
-  mapNotLoadedConfirmSave: { ru: 'Карта не загружена. Сохранить план без карты?', en: 'Map not loaded. Save plan without map?' },
-  cantLoadMapError: { ru: 'Не удалось загрузить файл карты: ', en: 'Failed to load map file: ' },
-
-  loadPlanError: { ru: 'Ошибка при загрузке файла плана!', en: 'Error loading plan file!' },
-  planLoadedOk: { ru: '✅ План успешно загружен!', en: '✅ Plan loaded successfully!' },
-
-  removeSymbolConfirm: { ru: 'Удалить этот символ?', en: 'Delete this symbol?' },
-  removeAllDrawingsConfirm: { ru: 'Удалить ВСЕ рисунки на карте?', en: 'Delete ALL drawings on the map?' },
-  clearMapConfirm: { ru: 'Очистить карту полностью? (иконки и рисунки)', en: 'Clear the map completely? (icons and drawings)' },
-
-  assaultStopped: { ru: 'Наступление остановлено', en: 'Assault stopped' },
-  loadMapFirst: { ru: 'Сначала загрузите карту.', en: 'Load the map first.' },
-
-  copyToEchelon: { ru: 'Скопировано в эшелон ', en: 'Copied to echelon ' },
-
-  saveScreenshotNoMap: { ru: 'Карта не загружена — нечего сохранять!', en: 'Map not loaded — nothing to save!' },
-
-  ok: { ru: 'OK', en: 'OK' }
-};
-
-function tUi(key){
-  const item = UI_TRANSLATIONS[key];
-  if(!item) return key;
-  return item[currentLang] || item.ru;
+// --- Entity ID generator for realtime sync ---
+function generateEntityId(prefix='e') {
+  return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8);
 }
 
-function setLanguage(lang){
-  currentLang = lang;
-  localStorage.setItem('mow2_lang', lang);
+// Helper wrappers for Firebase (теперь с echelon)
+window.firebaseCreateEntity = window.firebaseCreateEntity || function(entity, echelon){ /* no-op until firebase initialized */ };
+window.firebaseUpdateEntity = window.firebaseUpdateEntity || function(id, data, echelon){ /* no-op */ };
+window.firebaseDeleteEntity = window.firebaseDeleteEntity || function(id, echelon){ /* no-op */ };
 
-  // update lang toggle button (exists in HTML)
-  const langBtn = document.getElementById('langToggle');
-  if(langBtn){
-    langBtn.textContent = (lang === 'ru') ? UI_TRANSLATIONS.langButton_ru.ru : UI_TRANSLATIONS.langButton_en.en;
+// --- Многопользовательская синхронизация (улучшенная версия) ---
+let syncEnabled = false;
+let entityStore = {}; // {echelon: {id: {data, localUpdatedAt, layer}}}
+let dragDebounceTimers = {};
+
+// Debounce функция для drag и edit
+function debounce(fn, ms, key) {
+  return function(...args) {
+    clearTimeout(dragDebounceTimers[key]);
+    dragDebounceTimers[key] = setTimeout(() => fn(...args), ms);
+  };
+}
+
+// Получить состояние текущего эшелона
+function getCurrentEchelonState() {
+  if (!entityStore[currentEchelon]) {
+    entityStore[currentEchelon] = {};
   }
+  return entityStore[currentEchelon];
+}
 
-  // translate all elements with data-i18n attribute
-  document.querySelectorAll('[data-i18n]').forEach(el => {
-    const key = el.getAttribute('data-i18n');
-    if(UI_TRANSLATIONS[key]){
-      const txt = UI_TRANSLATIONS[key][lang] || UI_TRANSLATIONS[key].ru;
-      // preserve input children inside label
-      if(el.tagName.toLowerCase() === 'label' && el.querySelector('input')){
-        // replace text nodes only (before input)
-        const inputs = Array.from(el.querySelectorAll('input, select, button'));
-        // set label innerText except inputs: simpler to set firstChild text
-        el.childNodes.forEach(node => {
-          if(node.nodeType === Node.TEXT_NODE){
-            node.nodeValue = txt + ' ';
+// Применить remote entity (с проверкой конфликтов по timestamp)
+function applyRemoteEntity(entity) {
+  if (!syncEnabled || entity.echelon !== currentEchelon) return;
+  const state = getCurrentEchelonState();
+  const existing = state[entity.id];
+  
+  // Игнорируем, если локальная версия новее (last-write-wins)
+  if (existing && existing.localUpdatedAt >= entity.updatedAt) {
+    console.log('IGNORED remote (local newer):', entity.id);
+    return;
+  }
+  
+  // Обновляем store
+  state[entity.id] = {
+    data: entity.data,
+    remoteUpdatedAt: entity.updatedAt,
+    layer: null // будет установлен ниже
+  };
+  
+  // Удаляем старый layer, если есть
+  if (existing?.layer) {
+    if (existing.layer instanceof L.LayerGroup) {
+      existing.layer.clearLayers();
+    } else {
+      map.removeLayer(existing.layer);
+    }
+  }
+  
+  // Создаём новый layer
+  createLayerFromEntity(entity);
+  console.log('APPLIED remote entity:', entity.id, entity.type);
+}
+
+// Создать Leaflet layer из entity данных
+function createLayerFromEntity(entity) {
+  const state = getCurrentEchelonState();
+  let layer;
+  
+  try {
+    const data = entity.data;
+    switch (entity.type) {
+      case 'player_marker':
+        const icon = createRegDivIcon(data.ownerNick, data.nation, data.regimentFile, data.team);
+        layer = L.marker(data.latlng, { icon, draggable: true }).addTo(map);
+        
+        // Drag sync (debounce 250ms)
+        layer.on('dragend', debounce(() => {
+          const newLatLng = layer.getLatLng();
+          firebaseUpdateEntity(entity.id, { latlng: newLatLng }, currentEchelon);
+          // Обновляем local timestamp
+          state[entity.id].localUpdatedAt = Date.now();
+        }, 250, `drag_${entity.id}`));
+        
+        // Удаление по правой кнопке
+        layer.on('contextmenu', (e) => {
+          L.DomEvent.preventDefault(e);
+          if (confirm('Удалить маркер игрока?')) {
+            firebaseDeleteEntity(entity.id, currentEchelon);
           }
         });
-      } else {
-        el.textContent = txt;
-      }
+        
+        // Добавляем в markerList
+        const entry = { id: entity.id, team: data.team, playerIndex: data.playerIndex, nick: data.ownerNick, nation: data.nation, regimentFile: data.regimentFile, marker: layer };
+        markerList.push(entry);
+        break;
+        
+      case 'simple_symbol':
+        if (data.symbName && ICON_NAMES.includes(data.symbName)) {
+          layer = addCustomIcon(`assets/symbols/${data.symbName}.png`, data.latlng);
+        } else {
+          layer = addSimpleSymbol(data.simpleType, data.latlng);
+        }
+        layer.entityId = entity.id;
+        layer.entityType = 'simple_symbol';
+        
+        // Drag sync
+        layer.on('dragend', debounce(() => {
+          firebaseUpdateEntity(entity.id, { latlng: layer.getLatLng() }, currentEchelon);
+          state[entity.id].localUpdatedAt = Date.now();
+        }, 250, `drag_${entity.id}`));
+        
+        // Удаление
+        layer.on('contextmenu', (e) => {
+          L.DomEvent.preventDefault(e);
+          if (confirm('Удалить символ?')) {
+            map.removeLayer(layer);
+            simpleMarkers = simpleMarkers.filter(m => m !== layer);
+            firebaseDeleteEntity(entity.id, currentEchelon);
+          }
+        });
+        
+        simpleMarkers.push(layer);
+        break;
+        
+      case 'drawing':
+        layer = L.geoJSON(data.geojson, {
+          style: (feature) => feature.properties || {}
+        }).addTo(drawnItems);
+        
+        layer.entityId = entity.id;
+        layer.entityType = 'drawing';
+        
+        // Edit sync (debounce 500ms)
+        layer.on('edit', debounce(() => {
+          const newGeojson = layer.toGeoJSON();
+          newGeojson.properties = pickLayerOptions(layer);
+          firebaseUpdateEntity(entity.id, { geojson: newGeojson }, currentEchelon);
+          state[entity.id].localUpdatedAt = Date.now();
+        }, 500, `edit_${entity.id}`));
+        break;
     }
-  });
-
-  // update dynamic UI pieces that are created by JS (echelon label)
-  updateEchelonLabel();
-  // update any existing tooltips (we rely on lazy tooltip binding when creating markers)
-  // For existing markers that have tooltip bound, update tooltip content if possible
-  updateAllTooltips();
-}
-
-function translateString(objOrStr){
-  // If it's already an object with ru/en, pick accordingly
-  if(objOrStr && typeof objOrStr === 'object' && 'ru' in objOrStr){
-    return objOrStr[currentLang] || objOrStr.ru;
+    
+    if (layer) {
+      state[entity.id].layer = layer;
+      layer.entityId = entity.id;
+      layer.entityType = entity.type;
+    }
+  } catch (e) {
+    console.error('Error creating layer from entity:', e);
   }
-  // Otherwise if it's a string, attempt to find translation in UI_TRANSLATIONS values
-  return (objOrStr || '');
 }
 
-/* ------------------ Helper for labels stored as objects ------------------ */
+// --- Remote event handlers (БЕЗОПАСНЫЕ, С ЭШЕЛОНАМИ, БЕЗ ЦИКЛОВ) ---
+const processedEntities = new Set(); // Защита от дублирования
 
-// ICON_LABELS, ICON_SHORT and REG_NAMES converted to objects {ru, en}
-const ICON_LABELS = {
-  symb1:  { ru: 'Бронеавтомобиль', en: 'Armored Car' },
-  symb2:  { ru: 'Гаубица', en: 'Howitzer' },
-  symb3:  { ru: 'Противотанковая пушка', en: 'Anti-Tank Gun' },
-  symb4:  { ru: 'Противовоздушная оборона', en: 'Air Defense' },
-  symb5:  { ru: 'Основная пехота', en: 'Infantry' },
-  symb6:  { ru: 'Тяжелая пехота', en: 'Heavy Infantry' },
-  symb7:  { ru: 'Специальная пехота', en: 'Special Infantry' },
-  symb8:  { ru: 'Вспомогательная пехота', en: 'Auxiliary Infantry' },
-  symb9:  { ru: 'Подразделение поддержки', en: 'Support Unit' },
-  symb10: { ru: 'Тяжелый танк', en: 'Heavy Tank' },
-  symb11: { ru: 'Противотанковая САУ', en: 'Self-Propelled Tank Destroyer' },
-  symb12: { ru: 'Легкий танк', en: 'Light Tank' },
-  symb13: { ru: 'Средний танк', en: 'Medium Tank' },
-  symb14: { ru: 'Штурмовая САУ', en: 'Assault Gun' },
-  symb15: { ru: 'Самостоятельный пехотный отряд', en: 'Independent Infantry Squad' },
-  symb16: { ru: 'Парашютисты', en: 'Paratroopers' },
-  symb17: { ru: 'Фронтовая авиация', en: 'Frontline Aviation' },
-  symb18: { ru: 'Вспомогательная техника', en: 'Support Vehicle' }
-};
+window.addEventListener('remoteEntityAdded', (e) => {
+  const { entity, echelonId = 'default' } = e.detail;
+  if (!entity || !entity.id) return;
 
-// SHORT labels
-const ICON_SHORT = {
-  symb1:  { ru: 'Бронеавто', en: 'ArmCar' },
-  symb2:  { ru: 'Гаубица', en: 'Howz' },
-  symb3:  { ru: 'ПТ пушка', en: 'AT gun' },
-  symb4:  { ru: 'ПВО', en: 'AA' },
-  symb5:  { ru: 'Пехота', en: 'Inf' },
-  symb6:  { ru: 'Тяж. пех.', en: 'HeavyInf' },
-  symb7:  { ru: 'Спецпех.', en: 'SpecInf' },
-  symb8:  { ru: 'Всп. пех.', en: 'AuxInf' },
-  symb9:  { ru: 'Поддержка', en: 'Support' },
-  symb10: { ru: 'Тяж. танк', en: 'HeavyT' },
-  symb11: { ru: 'ПТ САУ', en: 'AT SPG' },
-  symb12: { ru: 'Лёг. танк', en: 'LightT' },
-  symb13: { ru: 'Сред. танк', en: 'MedT' },
-  symb14: { ru: 'Штурм. САУ', en: 'Assault SPG' },
-  symb15: { ru: 'Пех. отряд', en: 'Inf Squad' },
-  symb16: { ru: 'Десант', en: 'Airborne' },
-  symb17: { ru: 'Авиация', en: 'Aviation' },
-  symb18: { ru: 'Всп. тех.', en: 'SupportVeh' }
-};
+  const key = `${echelonId}_${entity.id}`;
+  if (processedEntities.has(key)) return;
+  processedEntities.add(key);
 
-// REG_NAMES converted to objects (for germany, usa, ussr)
-const REG_NAMES = {
-  germany: {
-    1: { ru: "Самоходный", en: "Self-propelled" },
-    2: { ru: "Развед", en: "Recon" },
-    3: { ru: "Механка", en: "Mechanized" },
-    4: { ru: "Гаубицы", en: "Howitzers" },
-    5: { ru: "Моторизованная пехота", en: "Motorized Infantry" },
-    6: { ru: "Огнеметный", en: "Flamethrower" },
-    7: { ru: "ПВО", en: "AA" },
-    8: { ru: "Саперка", en: "Sappers" },
-    9: { ru: "Гренадерский", en: "Grenadier" },
-    10:{ ru: "Минометный", en: "Mortar" },
-    11:{ ru: "Штурмовой", en: "Assault" },
-    12:{ ru: "Тяжелый танковый", en: "Heavy Tank" },
-    13:{ ru: "Противотанковый", en: "Antitank" },
-    14:{ ru: "Средний танковый", en: "Medium Tank" },
-    15:{ ru: "Первый артиллерийский", en: "1st Artillery" },
-    16:{ ru: "Первый пехотный", en: "1st Infantry" },
-    17:{ ru: "Первый танковый", en: "1st Tank" }
-  },
-  usa: {
-    1: { ru: "Самоходный", en: "Self-propelled" },
-    2: { ru: "Развед", en: "Recon" },
-    3: { ru: "Механка", en: "Mechanized" },
-    4: { ru: "Гаубицы", en: "Howitzers" },
-    5: { ru: "Моторизованная пехота", en: "Motorized Infantry" },
-    6: { ru: "Огнеметный", en: "Flamethrower" },
-    7: { ru: "ПВО", en: "AA" },
-    8: { ru: "Десантный", en: "Airborne" },
-    9: { ru: "Тяжелый танковый", en: "Heavy Tank" },
-    10:{ ru: "Минометный", en: "Mortar" },
-    11:{ ru: "Саперный", en: "Sapper" },
-    12:{ ru: "Средний танковый", en: "Medium Tank" },
-    13:{ ru: "Противотанковый", en: "Antitank" },
-    14:{ ru: "Штурмовой", en: "Assault" },
-    15:{ ru: "Первый артиллерийский", en: "1st Artillery" },
-    16:{ ru: "Первый пехотный", en: "1st Infantry" },
-    17:{ ru: "Первый танковый", en: "1st Tank" }
-  },
-  ussr: {
-    1: { ru: "Самоходный", en: "Self-propelled" },
-    2: { ru: "Развед", en: "Recon" },
-    3: { ru: "Механка", en: "Mechanized" },
-    4: { ru: "Гаубицы", en: "Howitzers" },
-    5: { ru: "Моторизованная пехота", en: "Motorized Infantry" },
-    6: { ru: "Огнеметный", en: "Flamethrower" },
-    7: { ru: "ПВО", en: "AA" },
-    8: { ru: "Саперка", en: "Sappers" },
-    9: { ru: "Тяжелый танковый", en: "Heavy Tank" },
-    10:{ ru: "Минометный", en: "Mortar" },
-    11:{ ru: "Штурмовой", en: "Assault" },
-    12:{ ru: "Средний танковый", en: "Medium Tank" },
-    13:{ ru: "Противотанковый", en: "Antitank" },
-    14:{ ru: "88-ой штурмовой", en: "88th Assault" },
-    15:{ ru: "Первый артиллерийский", en: "1st Artillery" },
-    16:{ ru: "Первый пехотный", en: "1st Infantry" },
-    17:{ ru: "Первый танковый", en: "1st Tank" }
+  // Сохраняем echelonId в entity, если его нет
+  entity.echelonId = echelonId;
+
+  applyRemoteEntity(entity);
+  console.log('ADDED remote entity:', entity.id, 'echelon:', echelonId);
+});
+
+window.addEventListener('remoteEntityChanged', (e) => {
+  const { entity, echelonId = 'default' } = e.detail;
+  if (!entity || !entity.id) return;
+
+  entity.echelonId = echelonId;
+  applyRemoteEntity(entity);
+  console.log('CHANGED remote entity:', entity.id, 'echelon:', echelonId);
+});
+
+window.addEventListener('remoteEntityRemoved', (e) => {
+  const { id, echelonId = 'default' } = e.detail;
+  const key = `${echelonId}_${id}`;
+  processedEntities.delete(key);
+
+  const state = getCurrentEchelonState();
+  const item = state[id];
+  if (item?.layer) {
+    if (item.layer instanceof L.LayerGroup) {
+      item.layer.clearLayers();
+    } else {
+      map.removeLayer(item.layer);
+    }
   }
-};
+  delete state[id];
 
-/* ------------------ Utility helpers ------------------ */
-function $id(id){ return document.getElementById(id); }
-function createEl(tag, cls){ const e = document.createElement(tag); if(cls) e.className = cls; return e; }
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+  // Очистка из списков
+  markerList = markerList.filter(m => m.id !== id);
+  simpleMarkers = simpleMarkers.filter(m => m.entityId !== id);
 
-function getLabelForSymbol(key){
-  // prefer short label if exists
-  if(ICON_SHORT[key]) return ICON_SHORT[key][currentLang] || ICON_SHORT[key].ru;
-  if(ICON_LABELS[key]) return ICON_LABELS[key][currentLang] || ICON_LABELS[key].ru;
-  return key;
-}
+  console.log('REMOVED remote entity:', id, 'echelon:', echelonId);
+});
 
-function getLongLabelForSymbol(key){
-  if(ICON_LABELS[key]) return ICON_LABELS[key][currentLang] || ICON_LABELS[key].ru;
-  return key;
-}
+window.addEventListener('remoteRoomLeft', () => {
+  syncEnabled = false;
+  entityStore = {};
+  processedEntities.clear();
+  console.log('Left room - sync disabled');
+});
 
-function getRegName(nation, idx){
-  const regs = REG_NAMES[nation] || {};
-  const v = regs[idx];
-  if(!v) return (currentLang === 'ru') ? `Полк ${idx}` : `Regiment ${idx}`;
-  return v[currentLang] || v.ru;
-}
+window.addEventListener('remoteParticipants', (e) => {
+  syncEnabled = true;
+  console.log('Room joined - sync enabled. Participants:', Object.keys(e.detail.participants).length);
+});
 
-/* ------------------ Original configuration (mostly unchanged) ------------------ */
-// ------------ Конфигурация ------------
+// ------------ Конфигурация ------------ 
 const MAP_COUNT = 25; // теперь map1..map25
 const MAP_FILE_PREFIX = "map"; // map1.jpg
 const MAP_FOLDER = "assets/maps/";
@@ -271,6 +249,49 @@ const ICON_CATEGORIES = {
   signs: ['symb31','symb32','symb33','symb34','symb35']
 };
 
+const ICON_LABELS = {
+  symb1:  'Бронеавтомобиль',
+  symb2:  'Гаубица',
+  symb3:  'Противотанковая пушка',
+  symb4:  'Противовоздушная оборона',
+  symb5:  'Основная пехота',
+  symb6:  'Тяжелая пехота',
+  symb7:  'Специальная пехота',
+  symb8:  'Вспомогательная пехота',
+  symb9:  'Подразделение поддержки',
+  symb10: 'Тяжелый танк',
+  symb11: 'Противотанковая САУ',
+  symb12: 'Легкий танк',
+  symb13: 'Средний танк',
+  symb14: 'Штурмовая САУ',
+  symb15: 'Самостоятельный пехотный отряд',
+  symb16: 'Парашютисты',
+  symb17: 'Фронтовая авиация',
+  symb18: 'Вспомогательная техника'
+};
+
+// Короткие подписи для всплывающей подсказки (используются при наведении)
+const ICON_SHORT = {
+  symb1:  'Бронеавто',
+  symb2:  'Гаубица',
+  symb3:  'ПТ пушка',
+  symb4:  'ПВО',
+  symb5:  'Пехота',
+  symb6:  'Тяж. пех.',
+  symb7:  'Спецпех.',
+  symb8:  'Всп. пех.',
+  symb9:  'Поддержка',
+  symb10: 'Тяж. танк',
+  symb11: 'ПТ САУ',
+  symb12: 'Лёг. танк',
+  symb13: 'Сред. танк',
+  symb14: 'Штурм. САУ',
+  symb15: 'Пех. отряд',
+  symb16: 'Десант',
+  symb17: 'Авиация',
+  symb18: 'Всп. тех.'
+};
+
 // Отображаемые имена карт (в порядке map1..map25)
 const MAP_NAMES = {
   1: "Airfield",
@@ -300,7 +321,74 @@ const MAP_NAMES = {
  25: "Marl"
 };
 
+// Регистры (отображаемые названия полков) для каждой нации (reg1..reg17)
+const REG_NAMES = {
+  germany: {
+    1: "Самоходный",
+    2: "Развед",
+    3: "Механка",
+    4: "Гаубицы",
+    5: "Моторизованная пехота",
+    6: "Огнеметный",
+    7: "ПВО",
+    8: "Саперка",
+    9: "Гренадерский",
+    10: "Минометный",
+    11: "Штурмовой",
+    12: "Тяжелый танковый",
+    13: "Противотанковый",
+    14: "Средний танковый",
+    15: "Первый артиллерийский",
+    16: "Первый пехотный",
+    17: "Первый танковый"
+  },
+  usa: {
+    1: "Самоходный",
+    2: "Развед",
+    3: "Механка",
+    4: "Гаубицы",
+    5: "Моторизованная пехота",
+    6: "Огнеметный",
+    7: "ПВО",
+    8: "Десантный",
+    9: "Тяжелый танковый",
+    10: "Минометный",
+    11: "Саперный",
+    12: "Средний танковый",
+    13: "Противотанковый",
+    14: "Штурмовой",
+    15: "Первый артиллерийский",
+    16: "Первый пехотный",
+    17: "Первый танковый"
+  },
+  ussr: {
+    1: "Самоходный",
+    2: "Развед",
+    3: "Механка",
+    4: "Гаубицы",
+    5: "Моторизованная пехота",
+    6: "Огнеметный",
+    7: "ПВО",
+    8: "Саперка",
+    9: "Тяжелый танковый",
+    10: "Минометный",
+    11: "Штурмовой",
+    12: "Средний танковый",
+    13: "Противотанковый",
+    14: "88-ой штурмовой",
+    15: "Первый артиллерийский",
+    16: "Первый пехотный",
+    17: "Первый танковый"
+  }
+};
+
 //------------ Полезные утилиты ------------
+function $id(id){ return document.getElementById(id); }
+function createEl(tag, cls){ const e = document.createElement(tag); if(cls) e.className = cls; return e; }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+//--------------------Исправление рисунков в эшелонах
+
 function pickLayerOptions(layer) {
   const opts = {};
   if (layer.options) {
@@ -364,8 +452,6 @@ map.addControl(drawControl);
 // ------------ Панель управления эшелонами ------------
 const echelonControl = L.control({ position: 'topright' });
 
-let echelonLabelElement = null;
-
 echelonControl.onAdd = function(map) {
   const container = L.DomUtil.create('div', 'leaflet-bar echelon-control');
   container.style.background = 'rgba(25,25,25,0.75)';
@@ -386,13 +472,12 @@ echelonControl.onAdd = function(map) {
   leftBtn.style.color = 'white';
   leftBtn.style.border = 'none';
   leftBtn.style.cursor = 'pointer';
-  leftBtn.title = (currentLang === 'ru') ? 'Предыдущий эшелон' : 'Previous echelon';
+  leftBtn.title = 'Предыдущий эшелон';
 
   const label = L.DomUtil.create('span','',container);
-  label.textContent = `${(currentLang==='ru'?'Эшелон':'Echelon')} ${currentEchelon}/${ECHELON_COUNT}`;
+  label.textContent = `Эшелон ${currentEchelon}/${ECHELON_COUNT}`;
   label.style.minWidth = '80px';
   label.style.textAlign = 'center';
-  echelonLabelElement = label;
 
   const rightBtn = L.DomUtil.create('button','',container);
   rightBtn.innerHTML = '⟶';
@@ -400,7 +485,7 @@ echelonControl.onAdd = function(map) {
   rightBtn.style.color = 'white';
   rightBtn.style.border = 'none';
   rightBtn.style.cursor = 'pointer';
-  rightBtn.title = (currentLang === 'ru') ? 'Следующий эшелон' : 'Next echelon';
+  rightBtn.title = 'Следующий эшелон';
 
   const copyBtn = L.DomUtil.create('button','',container);
   copyBtn.innerHTML = '📋';
@@ -408,7 +493,7 @@ echelonControl.onAdd = function(map) {
   copyBtn.style.color = 'white';
   copyBtn.style.border = 'none';
   copyBtn.style.cursor = 'pointer';
-  copyBtn.title = (currentLang === 'ru') ? 'Копировать текущее состояние в следующий эшелон' : 'Copy current state to next echelon';
+  copyBtn.title = 'Копировать текущее состояние в следующий эшелон';
 
   // обработчики
   L.DomEvent.on(leftBtn, 'click', e => {
@@ -416,7 +501,7 @@ echelonControl.onAdd = function(map) {
     saveCurrentEchelonState();
     currentEchelon = currentEchelon <= 1 ? ECHELON_COUNT : currentEchelon - 1;
     loadEchelonState(currentEchelon);
-    updateEchelonLabel();
+    label.textContent = `Эшелон ${currentEchelon}/${ECHELON_COUNT}`;
   });
 
   L.DomEvent.on(rightBtn, 'click', e => {
@@ -424,7 +509,7 @@ echelonControl.onAdd = function(map) {
     saveCurrentEchelonState();
     currentEchelon = currentEchelon >= ECHELON_COUNT ? 1 : currentEchelon + 1;
     loadEchelonState(currentEchelon);
-    updateEchelonLabel();
+    label.textContent = `Эшелон ${currentEchelon}/${ECHELON_COUNT}`;
   });
 
   L.DomEvent.on(copyBtn, 'click', e => {
@@ -432,7 +517,7 @@ echelonControl.onAdd = function(map) {
     saveCurrentEchelonState();
     const next = currentEchelon >= ECHELON_COUNT ? 1 : currentEchelon + 1;
     echelonStates[next] = JSON.parse(JSON.stringify(echelonStates[currentEchelon]));
-    alert( (currentLang==='ru' ? 'Скопировано в эшелон ' : 'Copied to echelon ') + next );
+    alert(`Скопировано в эшелон ${next}`);
   });
 
   return container;
@@ -440,13 +525,7 @@ echelonControl.onAdd = function(map) {
 
 map.addControl(echelonControl);
 
-function updateEchelonLabel(){
-  if(echelonLabelElement){
-    echelonLabelElement.textContent = `${(currentLang==='ru'?'Эшелон':'Echelon')} ${currentEchelon}/${ECHELON_COUNT}`;
-  }
-}
-
-// When a new shape is created via Draw, apply current color/weight and add to drawnItems
+// When a new shape is created via Draw, apply current color/weight and add to drawnItems + SYNC
 map.on(L.Draw.Event.CREATED, function (e) {
   const layer = e.layer;
   // apply style for polylines / polygons / circle
@@ -459,14 +538,55 @@ map.on(L.Draw.Event.CREATED, function (e) {
     layer.setStyle(style);
   }
   if (layer instanceof L.Circle) {
+    // circle has options.radius already
+    // ensure stroke color/weight set
     layer.setStyle && layer.setStyle({ color: getDrawColor(), weight: getDrawWeight() });
   }
   drawnItems.addLayer(layer);
+
+  // SYNC: Создаём entity для Firebase
+  const id = generateEntityId('draw');
+  const geojson = layer.toGeoJSON();
+  geojson.properties = pickLayerOptions(layer);
+
+  const entity = {
+    id: id,
+    type: 'drawing',
+    data: { geojson },
+    updatedAt: Date.now(),
+    echelon: currentEchelon
+  };
+
+  try {
+    firebaseCreateEntity(entity, currentEchelon);
+    getCurrentEchelonState()[id] = { data: entity.data, localUpdatedAt: entity.updatedAt, layer: layer };
+    layer.entityId = id;
+    layer.entityType = 'drawing';
+  } catch (e) {
+    console.warn('Firebase create drawing error:', e);
+  }
+
+  // Edit handler for sync
+  layer.on('edit', debounce(() => {
+    const newGeojson = layer.toGeoJSON();
+    newGeojson.properties = pickLayerOptions(layer);
+    firebaseUpdateEntity(id, { geojson: newGeojson }, currentEchelon);
+    getCurrentEchelonState()[id].localUpdatedAt = Date.now();
+  }, 500, `edit_${id}`));
 });
 
-// Ensure edits keep styles intact (nothing special needed, but keep handler)
-map.on(L.Draw.Event.EDITED, function (e) {});
-map.on(L.Draw.Event.DELETED, function (e) {});
+// Ensure edits keep styles intact
+map.on(L.Draw.Event.EDITED, function (e) {
+  // no-op - layers are already in drawnItems
+  // Sync уже в layer.on('edit')
+});
+map.on(L.Draw.Event.DELETED, function (e) {
+  e.layers.eachLayer(layer => {
+    if (layer.entityId) {
+      firebaseDeleteEntity(layer.entityId, currentEchelon);
+    }
+  });
+});
 
 // === SimpleSymbols с тремя вкладками ===
 const SimpleSymbols = L.Control.extend({
@@ -483,7 +603,7 @@ const SimpleSymbols = L.Control.extend({
     tabs.style.justifyContent = 'space-between';
     tabs.style.marginBottom = '4px';
 
-    const tabNames = { unit: (currentLang==='ru'?'Арм':'Unit'), engineer: (currentLang==='ru'?'Инж':'Eng'), signs: (currentLang==='ru'?'Сим':'Signs') };
+    const tabNames = { unit: 'Арм', engineer: 'Инж', signs: 'Сим' };
     const menus = {};
 
     for (const key in tabNames) {
@@ -540,10 +660,9 @@ const SimpleSymbols = L.Control.extend({
         btn.style.margin = '0';
         btn.style.textAlign = 'center';
         btn.style.verticalAlign = 'middle';
-        const title = getLongLabelForSymbol(name) || name;
         btn.innerHTML = `<img src="assets/symbols/${name}.png" 
                           alt="${name}" 
-                          title="${escapeHtml(title)}" 
+                          title="${ICON_LABELS[name] || name}" 
                           style="width:28px;height:28px;pointer-events:none">`;
 
         L.DomEvent.on(btn, 'click', e => {
@@ -562,7 +681,7 @@ const SimpleSymbols = L.Control.extend({
 
 map.addControl(new SimpleSymbols({ position: 'topleft' }));
 
-// === addSimpleSymbol с масштабируемыми иконками ===
+// === addSimpleSymbol с масштабируемыми иконками + SYNC ===
 function addSimpleSymbol(type, latlng) {
   const color = getDrawColor(); 
   const size = 60;
@@ -588,14 +707,37 @@ function addSimpleSymbol(type, latlng) {
     draggable: true
   }).addTo(map);
 
-  // НЕ добавляем tooltip для простых символов
-  marker._simpleType = type; // чтобы при сохранении/загрузке восстановить тип
+  // SYNC: Assign ID and send to Firebase
+  const id = generateEntityId('sym');
+  marker.entityId = id;
+  marker.entityType = 'simple_symbol';
+  marker._simpleType = type; // для сохранения
+
+  const entity = {
+    id: id,
+    type: 'simple_symbol',
+    data: { simpleType: type, latlng: marker.getLatLng() },
+    updatedAt: Date.now(),
+    echelon: currentEchelon
+  };
+
+  try {
+    firebaseCreateEntity(entity, currentEchelon);
+    getCurrentEchelonState()[id] = { data: entity.data, localUpdatedAt: entity.updatedAt, layer: marker };
+  } catch(e) { console.warn('firebaseCreateEntity error', e); }
+
+  // Drag sync
+  marker.on('dragend', debounce(() => {
+    firebaseUpdateEntity(id, { latlng: marker.getLatLng() }, currentEchelon);
+    getCurrentEchelonState()[id].localUpdatedAt = Date.now();
+  }, 250, `drag_${id}`));
 
   marker.on('click', () => {
-    if(confirm( (currentLang==='ru'?'Удалить этот символ?':'Delete this symbol?') )){
+    if(confirm('Удалить этот символ?')){
       map.removeLayer(marker);
       const idx = simpleMarkers.indexOf(marker);
       if(idx!==-1) simpleMarkers.splice(idx,1);
+      firebaseDeleteEntity(id, currentEchelon);
     }
   });
 
@@ -612,46 +754,52 @@ function addCustomIcon(url, latlng) {
     draggable: true
   }).addTo(map);
 
+  // SYNC: Assign ID and send
+  const id = generateEntityId('sym');
+  marker.entityId = id;
+  marker.entityType = 'simple_symbol';
+
   try {
     const file = String(url).split('/').pop() || '';
     const key = file.replace(/\.[^/.]+$/, '');
     marker._symbName = key;
 
-    // compute a string label safely whether ICON_LABELS entries are objects or strings
-    let label = key;
-    if (ICON_SHORT[key]) {
-      label = (typeof ICON_SHORT[key] === 'string') ? ICON_SHORT[key] :
-              (ICON_SHORT[key][currentLang] || ICON_SHORT[key].ru);
-    } else if (ICON_LABELS[key]) {
-      label = (typeof ICON_LABELS[key] === 'string') ? ICON_LABELS[key] :
-              (ICON_LABELS[key][currentLang] || ICON_LABELS[key].ru);
+    // --- Только если для символа есть label ---
+    if(ICON_LABELS[key]){
+      const label = ICON_SHORT[key] || ICON_LABELS[key];
+      marker.bindTooltip(label, {
+        permanent: false,
+        direction: "top",
+        offset: [0, -26],
+        opacity: 0.95,
+        className: 'symb-tooltip'
+      });
     }
 
-    // bind tooltip (if marker already has one, update it)
-    // skip tooltips for unit (Арм) and signs (Сим) categories as in original behavior
-    let skip = false;
-    try { if (ICON_CATEGORIES && ICON_CATEGORIES.engineer && ICON_CATEGORIES.engineer.includes(key)) skip = true; } catch(e){}
-    try { if (ICON_CATEGORIES && ICON_CATEGORIES.signs && ICON_CATEGORIES.signs.includes(key)) skip = true; } catch(e){}
-    if (!skip) {
-      if (marker.getTooltip && marker.getTooltip()) {
-        marker.setTooltipContent && marker.setTooltipContent(label);
-      } else {
-        marker.bindTooltip(label, {
-          permanent: false,
-          direction: "top",
-          offset: [0, -26],
-          opacity: 0.95,
-          className: 'symb-tooltip'
-        });
-      }
-    }
+    const entity = {
+      id: id,
+      type: 'simple_symbol',
+      data: { symbName: key, latlng: marker.getLatLng() },
+      updatedAt: Date.now(),
+      echelon: currentEchelon
+    };
+
+    firebaseCreateEntity(entity, currentEchelon);
+    getCurrentEchelonState()[id] = { data: entity.data, localUpdatedAt: entity.updatedAt, layer: marker };
   } catch (e) { console.warn('tooltip bind error', e); }
 
+  // Drag sync
+  marker.on('dragend', debounce(() => {
+    firebaseUpdateEntity(id, { latlng: marker.getLatLng() }, currentEchelon);
+    getCurrentEchelonState()[id].localUpdatedAt = Date.now();
+  }, 250, `drag_${id}`));
+
   marker.on('click', () => {
-    if (confirm(currentLang==='ru'?'Удалить этот символ?':'Delete this symbol?')) {
+    if (confirm('Удалить этот символ?')) {
       map.removeLayer(marker);
       const idx = simpleMarkers.indexOf(marker);
       if (idx !== -1) simpleMarkers.splice(idx, 1);
+      firebaseDeleteEntity(id, currentEchelon);
     }
   });
 
@@ -694,7 +842,9 @@ function loadMapByFile(fileName){
       const h = img.naturalHeight;
       // bounds: top-left [0,0], bottom-right [h, w] (lat,lng order for CRS.Simple)
       imageBounds = [[0,0],[h,w]];
+      // сбрасываем CRS и view: для простоты используем CRS.Simple and set view to center
       imageOverlay = L.imageOverlay(url, imageBounds).addTo(map);
+      // ensure overlay is behind markers/drawn items
       if (imageOverlay && typeof imageOverlay.bringToBack === 'function') {
         imageOverlay.bringToBack();
       }
@@ -703,21 +853,22 @@ function loadMapByFile(fileName){
       resolve();
     };
     img.onerror = function(){
-      reject(new Error( (currentLang==='ru'? UI_TRANSLATIONS.cantLoadMapError.ru : UI_TRANSLATIONS.cantLoadMapError.en) + url + '. Проверьте, что файл существует и название/регистр совпадают.' ));
+      reject(new Error('Не удалось загрузить файл карты: ' + url + '. Проверьте, что файл существует и название/регистр совпадают.'));
     };
     img.src = url;
   });
 }
 
-$id('btnLoadMap') && $id('btnLoadMap').addEventListener('click', ()=> {
+$id('btnLoadMap').addEventListener('click', ()=> {
   const sel = mapSelect.value;
-  if(!sel) return alert( tUi('chooseMapAlert') );
+  if(!sel) return alert('Выберите карту в списке.');
   loadMapByFile(sel).catch(err => alert(err.message));
 });
 
-$id('btnResetMap') && $id('btnResetMap').addEventListener('click', ()=> {
+$id('btnResetMap').addEventListener('click', ()=>{
   if(imageOverlay) map.removeLayer(imageOverlay);
   imageOverlay = null; imageBounds = null; currentMapFile = null;
+  // сброс view
   map.setView([0,0], 0);
 });
 
@@ -727,15 +878,16 @@ const BLUE_PLAYERS = $id('bluePlayers');
 const NATIONS = ['ussr','germany','usa'];
 
 function makePlayerRow(team, index){
+  // keep original indexing as in your code (index passed 1..5 earlier) - we'll use 1-based here for label but store 0-based where needed
   const row = createEl('div','player-row');
   const nickId = `${team}-nick-${index}`;
   const nationId = `${team}-nation-${index}`;
   const regId = `${team}-reg-${index}`;
   row.innerHTML = `
-    <input id="${nickId}" type="text" placeholder="${currentLang==='ru'?'Ник':'Nick'}" />
+    <input id="${nickId}" type="text" placeholder="Ник" />
     <select id="${nationId}" class="nation-select"></select>
     <select id="${regId}" class="reg-select"></select>
-    <button id="${team}-place-${index}">${currentLang==='ru'?'Поставить':'Place'}</button>
+    <button id="${team}-place-${index}">Поставить</button>
   `;
   // заполним нации
   const nationSel = row.querySelector(`#${nationId}`);
@@ -747,10 +899,11 @@ function makePlayerRow(team, index){
   function fillRegOptions(nation){
     regSel.innerHTML = '';
     const regs = REG_NAMES[nation] || {};
+    // добавляем до 17
     for(let i=1;i<=17;i++){
       const opt = createEl('option');
       opt.value = `reg${i}.png`;
-      opt.textContent = getRegName(nation, i);
+      opt.textContent = (regs[i] || `Полк ${i}`);
       regSel.appendChild(opt);
     }
   }
@@ -759,8 +912,8 @@ function makePlayerRow(team, index){
 
   // кнопка поставить
   const btn = row.querySelector(`#${team}-place-${index}`);
-  btn.addEventListener('click', ()=> {
-    const nick = (row.querySelector(`#${nickId}`).value || (currentLang==='ru' ? `Игрок ${index}` : `Player ${index}`));
+  btn.addEventListener('click', ()=>{
+    const nick = (row.querySelector(`#${nickId}`).value || `Игрок ${index}`);
     const nation = row.querySelector(`#${nationId}`).value;
     const regiment = row.querySelector(`#${regId}`).value;
     placeMarker(nick, nation, regiment, team, index-1); // store 0-based index internally
@@ -770,17 +923,19 @@ function makePlayerRow(team, index){
 }
 
 for(let i=1;i<=5;i++){
-  RED_PLAYERS && RED_PLAYERS.appendChild(makePlayerRow('red', i));
-  BLUE_PLAYERS && BLUE_PLAYERS.appendChild(makePlayerRow('blue', i));
+  RED_PLAYERS.appendChild(makePlayerRow('red', i));
+  BLUE_PLAYERS.appendChild(makePlayerRow('blue', i));
 }
 
-//------------ Управление маркерами ------------
+//------------ Управление маркерами + SYNC ------------
 function generateMarkerId(team, idx){ return `${team}-${idx}`; }
 
+// создаём divIcon с <img onerror=...> чтобы показывать заглушку если не нашлось
 function createRegDivIcon(nick, nation, regimentFile, team) {
   const iconUrl = `${ICON_FOLDER}${nation}/${regimentFile}`;
   const size = 56;
 
+  // Назначаем класс в зависимости от выбранной команды
   const teamClass =
     team === 'blue' ? 'blue-marker' : team === 'red' ? 'red-marker' : '';
 
@@ -799,28 +954,55 @@ function createRegDivIcon(nick, nation, regimentFile, team) {
     iconAnchor: [Math.round(size / 2), Math.round(size / 2)],
   });
 }
+
 function placeMarker(nick, nation, regimentFile, team, playerIndex){
   const id = generateMarkerId(team, playerIndex);
 
+  // удалим старый маркер этого игрока, если есть
   const existingIndex = markerList.findIndex(m => m.id === id);
   if (existingIndex !== -1) {
     try { map.removeLayer(markerList[existingIndex].marker); } catch(e){}
     markerList.splice(existingIndex, 1);
+    // Удаляем из store
+    delete getCurrentEchelonState()[id];
   }
 
+  // позиция: центр карты (или центр изображения)
   const pos = map.getCenter();
   const icon = createRegDivIcon(nick, nation, regimentFile, team);
   const marker = L.marker(pos, { icon, draggable: true }).addTo(map);
 
-  marker.on('dragend', ()=> {});
+  // SYNC: Assign ID and handlers
+  marker.entityId = id;
+  marker.entityType = 'player_marker';
+
+  marker.on('dragend', debounce(() => {
+    const newLatLng = marker.getLatLng();
+    firebaseUpdateEntity(id, { latlng: newLatLng }, currentEchelon);
+    getCurrentEchelonState()[id].localUpdatedAt = Date.now();
+  }, 250, `drag_${id}`));
+
+  const entity = {
+    id: id,
+    type: 'player_marker',
+    data: { ownerNick: nick, nation, regimentFile, team, playerIndex, latlng: pos },
+    updatedAt: Date.now(),
+    echelon: currentEchelon
+  };
+
+  try {
+    firebaseCreateEntity(entity, currentEchelon);
+    getCurrentEchelonState()[id] = { data: entity.data, localUpdatedAt: entity.updatedAt, layer: marker };
+  } catch(e) { console.warn(e); }
 
   const entry = { id, team, playerIndex, nick, nation, regimentFile, marker };
   markerList.push(entry);
 }
 
 //------------ Кнопки готовых символов ------------
-$id('btnFront') && $id('btnFront').addEventListener('click', ()=> {
-  if(!imageBounds) return alert( tUi('loadMapFirst') );
+$id('btnFront').addEventListener('click', ()=>{
+  if(!imageBounds) return alert('Загрузите карту перед добавлением символов (кнопка "Загрузить карту").');
+  // фронт: прямая линия через центр горизонтально
   const b = imageBounds;
   const y = (b[0][0] + b[1][0]) / 2;
   const left = [y, b[0][1]];
@@ -828,257 +1010,12 @@ $id('btnFront') && $id('btnFront').addEventListener('click', ()=> {
   const color = getDrawColor();
   const weight = getDrawWeight();
   const line = L.polyline([left, right], { color, weight }).addTo(drawnItems);
+  
+  // SYNC: Автоматически добавляется через draw:created
 });
 
-$id('btnFillLower') && $id('btnFillLower').addEventListener('click', ()=> {
-  if (!imageBounds) return alert( tUi('loadMapFirst') );
+//-------------Сохранение и загрузка состояния эшелона----------
 
-  const color = getDrawColor();
-
-  const top = imageBounds[0][0];
-  const bottom = imageBounds[1][0];
-  const left = imageBounds[0][1];
-  const right = imageBounds[1][1];
-
-  const midY = (top + bottom) / 2;
-
-  L.polygon([
-    [midY, left],
-    [midY, right],
-    [bottom, right],
-    [bottom, left]
-  ], {
-    color: color,
-    weight: 2,
-    fillColor: color,
-    fillOpacity: 0.10
-  }).addTo(drawnItems);
-});
-
-let assaultTimer = null;
-
-function toggleAssault() {
-  if (assaultTimer) {
-    clearInterval(assaultTimer);
-    assaultTimer = null;
-    alert(tUi('assaultStopped'));
-    return;
-  }
-
-  if (!imageBounds) return alert(tUi('loadMapFirst'));
-
-  const top = imageBounds[0][0];
-  const bottom = imageBounds[1][0];
-  const left = imageBounds[0][1];
-  const right = imageBounds[1][1];
-
-  const waveInterval = 30000;
-  const frontDuration = 8000;
-
-  function spawnArrowSVG() {
-    const xMid = left + Math.random() * (right - left);
-    const yStart = bottom - 5;
-    const yEnd = top + (bottom - top) * 0.45;
-
-    const svg = `
-      <svg width="40" height="60" viewBox="0 0 40 60" xmlns="http://www.w3.org/2000/svg">
-        <polygon points="20,60 35,10 20,20 5,10" fill="#ff3300" fill-opacity="0.35"/>
-      </svg>
-    `;
-
-    const icon = L.divIcon({
-      html: svg,
-      className: 'assault-arrow',
-      iconSize: [40, 60],
-      iconAnchor: [20, 60],
-    });
-
-    const marker = L.marker([yStart, xMid], { icon, interactive: false }).addTo(drawnItems);
-
-    const startTime = performance.now();
-    function animate() {
-      const now = performance.now();
-      const progress = Math.min((now - startTime) / frontDuration, 1);
-      const newY = yStart - (yStart - yEnd) * progress;
-
-      marker.setLatLng([newY, xMid]);
-
-      if (progress < 1) requestAnimationFrame(animate);
-      else setTimeout(() => drawnItems.removeLayer(marker), 2000);
-    }
-    requestAnimationFrame(animate);
-  }
-
-  spawnArrowSVG();
-  assaultTimer = setInterval(spawnArrowSVG, waveInterval);
-}
-
-document.getElementById("btnAssault") && document.getElementById("btnAssault").addEventListener("click", toggleAssault);
-
-// ------------ Сохранить план в JSON (обновлено с учётом эшелонов) ------------
-$id('btnSave') && $id('btnSave').addEventListener('click', () => {
-  if (!currentMapFile && !confirm( tUi('mapNotLoadedConfirmSave') )) return;
-
-  saveCurrentEchelonState();
-
-  const plan = {
-    meta: {
-      createdAt: new Date().toISOString(),
-      mapFile: currentMapFile || null,
-      echelonCount: ECHELON_COUNT
-    },
-    echelons: {},
-    mapState: { center: map.getCenter(), zoom: map.getZoom() }
-  };
-
-  for (let e = 1; e <= ECHELON_COUNT; e++) {
-    const state = echelonStates[e];
-    if (!state) continue;
-
-    plan.echelons[e] = {
-      markers: state.markers || [],
-      simple: state.simple || [],
-      drawings: state.drawings || []
-    };
-  }
-
-  const blob = new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = (currentMapFile || 'plan').replace(/\.[^/.]+$/, '') + '_plan.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
-});
-
-// ------------ Загрузка плана из JSON (обновлено с учётом эшелонов) ------------
-function loadPlanData(plan) {
-  if (!plan) return;
-
-  const mapFile = plan.meta?.mapFile || 'map1.jpg';
-  if (mapSelect) mapSelect.value = mapFile;
-
-  loadMapByFile(mapFile).then(() => {
-    if (plan.echelons) {
-      for (let e = 1; e <= (plan.meta?.echelonCount || 3); e++) {
-        const state = plan.echelons[e];
-        if (!state) continue;
-        echelonStates[e] = {
-          markers: (state.markers || []).map(m => ({
-            ...m,
-            marker: null
-          })),
-          simple: state.simple || [],
-          drawings: state.drawings || []
-        };
-      }
-
-      currentEchelon = 1;
-      loadEchelonState(currentEchelon);
-    } else {
-      echelonStates = {
-        1: {
-          markers: plan.markers || [],
-          simple: plan.simple || [],
-          drawings: plan.drawings || []
-        },
-        2: { markers: [], simple: [], drawings: [] },
-        3: { markers: [], simple: [], drawings: [] }
-      };
-      currentEchelon = 1;
-      loadEchelonState(1);
-    }
-
-    if (plan.mapState && plan.mapState.center && plan.mapState.zoom)
-      map.setView(plan.mapState.center, plan.mapState.zoom);
-
-    alert( tUi('planLoadedOk') );
-  }).catch(err => {
-    console.error('Ошибка при загрузке карты:', err);
-    alert( tUi('loadPlanError') );
-  });
-}
-
-// === Обработчик кнопки загрузки плана ===
-document.getElementById("loadPlan") && document.getElementById("loadPlan").addEventListener("click", () => {
-  const input = document.getElementById("planFileInput");
-  input.value = null;
-  input.click();
-});
-
-document.getElementById("planFileInput") && document.getElementById("planFileInput").addEventListener("change", function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    try {
-      const data = JSON.parse(ev.target.result);
-      loadPlanData(data);
-    } catch(err) {
-      console.error(err);
-      alert( tUi('loadPlanError') );
-    } finally {
-      e.target.value = null;
-    }
-  };
-  reader.readAsText(file);
-});
-
-map.attributionControl.setPrefix(false);
-map.attributionControl.addAttribution('');
-
-// UI bindings
-$id('btnEraser') && $id('btnEraser').addEventListener('click', ()=> {
-  if(!confirm( tUi('removeAllDrawingsConfirm') )) return;
-  drawnItems.clearLayers();
-});
-
-$id('btnClearAll') && $id('btnClearAll').addEventListener('click', ()=> {
-  if(!confirm( tUi('clearMapConfirm') )) return;
-  markerList.forEach(m => { try { map.removeLayer(m.marker); } catch(e){} });
-  markerList = [];
-  simpleMarkers.forEach(m => { try { map.removeLayer(m); } catch(e){} });
-  simpleMarkers = [];
-  drawnItems.clearLayers();
-});
-
-$id('drawWeight') && $id('drawWeight').addEventListener('input', (e)=> {
-  $id('weightVal').textContent = e.target.value;
-});
-
-// ------------ Сохранить карту как изображение ------------
-function saveMapAsScreenshot() {
-  if (!imageOverlay) return alert( tUi('saveScreenshotNoMap') );
-
-  const mapContainer = document.getElementById('map');
-
-  const tooltips = mapContainer.querySelectorAll('.leaflet-tooltip');
-  tooltips.forEach(t => t.style.display = 'none');
-
-  html2canvas(mapContainer, {
-    backgroundColor: null,
-    useCORS: true,
-    allowTaint: true,
-    scale: 2
-  }).then(canvas => {
-    tooltips.forEach(t => t.style.display = '');
-
-    const link = document.createElement('a');
-    const fileName = currentMapFile
-      ? currentMapFile.replace(/\.[^/.]+$/, '') + '_plan.png'
-      : 'map_plan.png';
-    link.download = fileName;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-  }).catch(err => {
-    console.error("Ошибка при создании скриншота карты:", err);
-    alert( currentLang==='ru' ? 'Не удалось сохранить карту как изображение.' : 'Failed to save map as image.' );
-  });
-}
-
-document.getElementById('btnSaveImage') && document.getElementById('btnSaveImage').addEventListener('click', saveMapAsScreenshot);
-
-// ------------ Состояния эшелона (save/load) ------------
 function saveCurrentEchelonState() {
   echelonStates[currentEchelon] = {
     markers: markerList.map(m => ({
@@ -1120,15 +1057,19 @@ function loadEchelonState(echelon) {
   if(!echelonStates[echelon]) return;
   const state = echelonStates[echelon];
 
+  // очистить текущее (но сохраняем entityStore для sync)
   drawnItems.clearLayers();
   markerList.forEach(m => { try { map.removeLayer(m.marker); } catch(e){} });
   markerList = [];
   simpleMarkers.forEach(m => { try { map.removeLayer(m); } catch(e){} });
   simpleMarkers = [];
 
+  // восстановить (sync handlers добавятся автоматически)
   (state.markers||[]).forEach(m=>{
     const pos = m.latlng || {lat:0,lng:0};
     const marker = L.marker([pos.lat,pos.lng], { icon:createRegDivIcon(m.nick,m.nation,m.regimentFile,m.team), draggable:true }).addTo(map);
+    marker.entityId = m.id;
+    marker.entityType = 'player_marker';
     markerList.push({...m, marker});
   });
 
@@ -1156,74 +1097,311 @@ function loadEchelonState(echelon) {
   });
 }
 
-// update existing tooltips for markers
-function updateAllTooltips(){
-  // Ensure all symbol markers have tooltips with current language labels.
-  markerList.forEach(m => {
-    try{
-      const key = (m.marker && (m.marker._symbName || m.marker._simpleType)) || m._symbName || null;
-      if(key){
-        let skip = false;
-        try{ if(ICON_CATEGORIES && ICON_CATEGORIES.engineer && ICON_CATEGORIES.engineer.includes(key)) skip = true; }catch(e){}
-        try{ if(ICON_CATEGORIES && ICON_CATEGORIES.signs && ICON_CATEGORIES.signs.includes(key)) skip = true; }catch(e){}
-        if(skip) return;
-        if(ICON_LABELS[key]){
-          const label = (ICON_SHORT[key] && (typeof ICON_SHORT[key] === 'string' ? ICON_SHORT[key] : (ICON_SHORT[key][currentLang] || ICON_SHORT[key].ru)))
-                        || (typeof ICON_LABELS[key] === 'string' ? ICON_LABELS[key] : (ICON_LABELS[key][currentLang] || ICON_LABELS[key].ru));
-          if (m.marker.getTooltip && m.marker.getTooltip()) {
-            m.marker.setTooltipContent && m.marker.setTooltipContent(label);
-          } else if (m.marker.bindTooltip) {
-            m.marker.bindTooltip(label, { permanent:false, direction:"top", offset:[0,-26], opacity:0.95, className:'symb-tooltip' });
-          }
-        }
-      }
-    } catch(e){}
+//------------ Ластик и очистка ------------
+$id('btnEraser').addEventListener('click', ()=>{
+  if(!confirm('Удалить ВСЕ рисунки на карте?')) return;
+  drawnItems.clearLayers();
+  // SYNC: Удаляем все drawing entities
+  const state = getCurrentEchelonState();
+  Object.keys(state).forEach(id => {
+    if (state[id].entityType === 'drawing') {
+      firebaseDeleteEntity(id, currentEchelon);
+      delete state[id];
+    }
   });
-  simpleMarkers.forEach(m=>{
-    try{
-      const key = m._symbName;
-      if(key){
-        let skip = false;
-        try{ if(ICON_CATEGORIES && ICON_CATEGORIES.engineer && ICON_CATEGORIES.engineer.includes(key)) skip = true; }catch(e){}
-        try{ if(ICON_CATEGORIES && ICON_CATEGORIES.signs && ICON_CATEGORIES.signs.includes(key)) skip = true; }catch(e){}
-        if(skip) return;
-        if(ICON_LABELS[key]){
-          const label = (ICON_SHORT[key] && (typeof ICON_SHORT[key] === 'string' ? ICON_SHORT[key] : (ICON_SHORT[key][currentLang] || ICON_SHORT[key].ru)))
-                        || (typeof ICON_LABELS[key] === 'string' ? ICON_LABELS[key] : (ICON_LABELS[key][currentLang] || ICON_LABELS[key].ru));
-          if (m.getTooltip && m.getTooltip()) {
-            m.setTooltipContent && m.setTooltipContent(label);
-          } else if (m.bindTooltip) {
-            m.bindTooltip(label, { permanent:false, direction:"top", offset:[0,-26], opacity:0.95, className:'symb-tooltip' });
-          }
-        }
+});
+
+$id('btnClearAll').addEventListener('click', ()=>{
+  if(!confirm('Очистить карту полностью? (иконки и рисунки)')) return;
+  // удалить маркеры
+  markerList.forEach(m => { try { map.removeLayer(m.marker); } catch(e){} });
+  markerList = [];
+  // удалить простые символы
+  simpleMarkers.forEach(m => { try { map.removeLayer(m); } catch(e){} });
+  simpleMarkers = [];
+  // удалить рисунки
+  drawnItems.clearLayers();
+  
+  // SYNC: Удаляем все entities
+  const state = getCurrentEchelonState();
+  Object.keys(state).forEach(id => {
+    firebaseDeleteEntity(id, currentEchelon);
+  });
+  entityStore[currentEchelon] = {};
+});
+
+//------------ Полоса толщины (связываем с UI) ------------
+$id('drawWeight').addEventListener('input', (e)=>{
+  $id('weightVal').textContent = e.target.value;
+});
+
+// ------------ Сохранение плана в JSON (обновлено с учётом эшелонов) ------------
+$id('btnSave').addEventListener('click', () => {
+  if (!currentMapFile && !confirm('Карта не загружена. Сохранить план без карты?')) return;
+
+  // Перед сохранением актуализируем текущий эшелон
+  saveCurrentEchelonState();
+
+  const plan = {
+    meta: {
+      createdAt: new Date().toISOString(),
+      mapFile: currentMapFile || null,
+      echelonCount: ECHELON_COUNT
+    },
+    echelons: {},
+    mapState: { center: map.getCenter(), zoom: map.getZoom() }
+  };
+
+  // Сохраняем данные по каждому эшелону
+  for (let e = 1; e <= ECHELON_COUNT; e++) {
+    const state = echelonStates[e];
+    if (!state) continue;
+
+    plan.echelons[e] = {
+      markers: state.markers || [],
+      simple: state.simple || [],
+      drawings: state.drawings || []
+    };
+  }
+
+  const blob = new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (currentMapFile || 'plan').replace(/\.[^/.]+$/, '') + '_plan.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+
+// ------------ Загрузка плана из JSON (обновлено с учётом эшелонов) ------------
+function loadPlanData(plan) {
+  if (!plan) return;
+
+  const mapFile = plan.meta?.mapFile || 'map1.jpg';
+  if (mapSelect) mapSelect.value = mapFile;
+
+  loadMapByFile(mapFile).then(() => {
+    // Если план содержит эшелоны
+    if (plan.echelons) {
+      // Восстанавливаем все эшелоны
+      for (let e = 1; e <= (plan.meta?.echelonCount || 3); e++) {
+        const state = plan.echelons[e];
+        if (!state) continue;
+        echelonStates[e] = {
+          markers: (state.markers || []).map(m => ({
+            ...m,
+            marker: null // создадим позже при активации эшелона
+          })),
+          simple: state.simple || [],
+          drawings: state.drawings || []
+        };
       }
-    } catch(e){}
+
+      // Загружаем первый эшелон по умолчанию
+      currentEchelon = 1;
+      loadEchelonState(currentEchelon);
+    } else {
+      // Старые планы без эшелонов — грузим как один общий эшелон
+      echelonStates = {
+        1: {
+          markers: plan.markers || [],
+          simple: plan.simple || [],
+          drawings: plan.drawings || []
+        },
+        2: { markers: [], simple: [], drawings: [] },
+        3: { markers: [], simple: [], drawings: [] }
+      };
+      currentEchelon = 1;
+      loadEchelonState(1);
+    }
+
+    // Восстанавливаем позицию карты
+    if (plan.mapState && plan.mapState.center && plan.mapState.zoom)
+      map.setView(plan.mapState.center, plan.mapState.zoom);
+
+    alert('✅ План успешно загружен!');
+  }).catch(err => {
+    console.error('Ошибка при загрузке карты:', err);
+    alert('Ошибка при загрузке карты/плана: ' + (err.message || err));
   });
 }
 
-
-/* ------------------ init language UI ------------------ */
-window.addEventListener('load', ()=> {
-  // add language toggle if exists
-  const btn = document.getElementById('langToggle');
-  if(btn){
-    btn.textContent = (currentLang==='ru') ? UI_TRANSLATIONS.langButton_ru.ru : UI_TRANSLATIONS.langButton_en.en;
-    btn.addEventListener('click', ()=> {
-      const newLang = (currentLang === 'ru') ? 'en' : 'ru';
-      setLanguage(newLang);
-      // update some dynamic pieces that depend on text values (player rows)
-      // Rebuild player rows labels to update placeholders/button text
-      // quick approach: rebuild player lists
-      RED_PLAYERS.innerHTML = '';
-      BLUE_PLAYERS.innerHTML = '';
-      for(let i=1;i<=5;i++){
-        RED_PLAYERS.appendChild(makePlayerRow('red', i));
-        BLUE_PLAYERS.appendChild(makePlayerRow('blue', i));
-      }
-    });
-  }
-
-  setLanguage(currentLang);
+// === Обработчик кнопки загрузки плана ===
+document.getElementById("loadPlan").addEventListener("click", () => {
+  const input = document.getElementById("planFileInput");
+  input.value = null; // сброс предыдущего выбора
+  input.click();
 });
 
-})(); // end closure
+document.getElementById("planFileInput").addEventListener("change", function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      loadPlanData(data);  // <-- функция загрузки плана
+    } catch(err) {
+      console.error(err);
+      alert("Ошибка при загрузке файла плана!");
+    } finally {
+      e.target.value = null; // сброс input после загрузки
+    }
+  };
+  reader.readAsText(file);
+});
+
+map.attributionControl.setPrefix(false); // убирает "Leaflet"
+map.attributionControl.addAttribution(''); // очищает оставшийся текст
+
+$id('btnFillLower').addEventListener('click', () => {
+  if (!imageBounds) return alert('Сначала загрузите карту.');
+
+  const color = getDrawColor();
+
+  const top = imageBounds[0][0];    // верх карты = 0
+  const bottom = imageBounds[1][0]; // низ карты = высота изображения
+  const left = imageBounds[0][1];   // левый край = 0
+  const right = imageBounds[1][1];  // правый край = ширина изображения
+
+  const midY = (top + bottom) / 2;
+
+  L.polygon([
+    [midY, left],    // середина слева
+    [midY, right],   // середина справа
+    [bottom, right], // низ справа
+    [bottom, left]   // низ слева
+  ], {
+    color: color,
+    weight: 2,
+    fillColor: color,
+    fillOpacity: 0.10
+  }).addTo(drawnItems);
+  // SYNC: Автоматически через draw:created
+});
+
+let assaultTimer = null;
+
+function toggleAssault() {
+  if (assaultTimer) {
+    clearInterval(assaultTimer);
+    assaultTimer = null;
+    alert("Наступление остановлено");
+    return;
+  }
+
+  if (!imageBounds) return alert("Сначала загрузите карту!");
+
+  const top = imageBounds[0][0];    // верх карты
+  const bottom = imageBounds[1][0]; // низ карты
+  const left = imageBounds[0][1];
+  const right = imageBounds[1][1];
+
+  const waveInterval = 30000;  // каждые 30 секунд
+  const frontDuration = 8000;  // длительность движения
+
+  function spawnArrowSVG() {
+    const xMid = left + Math.random() * (right - left); // случайно по горизонтали
+    const yStart = bottom - 5;                           // чуть выше низа
+    const yEnd = top + (bottom - top) * 0.45;           // чуть ниже верхнего края / до середины
+
+    // SVG стрелка (вершина стрелки смотрит вверх)
+    const svg = `
+      <svg width="40" height="60" viewBox="0 0 40 60" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="20,60 35,10 20,20 5,10" fill="#ff3300" fill-opacity="0.35"/>
+      </svg>
+    `;
+
+    const icon = L.divIcon({
+      html: svg,
+      className: 'assault-arrow',
+      iconSize: [40, 60],
+      iconAnchor: [20, 60], // нижняя точка стрелки на маркере
+    });
+
+    const marker = L.marker([yStart, xMid], { icon, interactive: false }).addTo(drawnItems);
+
+    const startTime = performance.now();
+    function animate() {
+      const now = performance.now();
+      const progress = Math.min((now - startTime) / frontDuration, 1);
+      const newY = yStart - (yStart - yEnd) * progress; // движение вверх
+
+      marker.setLatLng([newY, xMid]);
+
+      if (progress < 1) requestAnimationFrame(animate);
+      else setTimeout(() => drawnItems.removeLayer(marker), 2000);
+    }
+    requestAnimationFrame(animate);
+  }
+
+  // первый запуск сразу
+  spawnArrowSVG();
+  assaultTimer = setInterval(spawnArrowSVG, waveInterval);
+}
+
+// кнопка
+document.getElementById("btnAssault").addEventListener("click", toggleAssault);
+
+// ------------ Сохранить карту как изображение (исправлено: без сдвигов полигонов) ------------
+
+function saveMapAsScreenshot() {
+  if (!imageOverlay) return alert("Карта не загружена — нечего сохранять!");
+
+  const mapContainer = document.getElementById('map');
+
+  // Скрываем всплывающие окна Leaflet (если есть)
+  const tooltips = mapContainer.querySelectorAll('.leaflet-tooltip');
+  tooltips.forEach(t => t.style.display = 'none');
+
+  html2canvas(mapContainer, {
+    backgroundColor: null,
+    useCORS: true,
+    allowTaint: true,
+    scale: 2 // повышаем разрешение
+  }).then(canvas => {
+    // Восстанавливаем tooltips
+    tooltips.forEach(t => t.style.display = '');
+
+    const link = document.createElement('a');
+    const fileName = currentMapFile
+      ? currentMapFile.replace(/\.[^/.]+$/, '') + '_plan.png'
+      : 'map_plan.png';
+    link.download = fileName;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  }).catch(err => {
+    console.error("Ошибка при создании скриншота карты:", err);
+    alert("Не удалось сохранить карту как изображение.");
+  });
+}
+
+// Привязка к кнопке
+document.getElementById('btnSaveImage').addEventListener('click', saveMapAsScreenshot);
+
+window.addEventListener('remoteEntityAdded', (e)=> {
+  const entity = e.detail.entity;
+  // Создаём маркер из entity (пример для player_marker)
+  if (entity.type === 'player_marker') {
+    const data = entity.data;
+    const marker = L.marker(data.latlng, { icon: createRegDivIcon(data.ownerNick, data.nation, data.regimentFile, data.team), draggable: true }).addTo(map);
+    marker.on('dragend', () => firebaseUpdateEntity(entity.id, { latlng: marker.getLatLng() }));
+    markerList.push({ id: entity.id, ...data, marker });
+  } // Добавь для simple_symbol и drawing аналогично
+});
+window.addEventListener('remoteEntityChanged', (e)=> {
+  const entity = e.detail.entity;
+  const existing = markerList.find(m => m.id === entity.id);
+  if (existing) existing.marker.setLatLng(entity.data.latlng);
+  // Аналогично для simpleMarkers и drawnItems
+});
+window.addEventListener('remoteEntityRemoved', (e)=> {
+  const id = e.detail.id;
+  const existingIndex = markerList.findIndex(m => m.id === id);
+  if (existingIndex !== -1) {
+    map.removeLayer(markerList[existingIndex].marker);
+    markerList.splice(existingIndex, 1);
+  }
+  // Аналогично для simpleMarkers и drawnItems
+});
