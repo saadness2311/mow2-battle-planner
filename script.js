@@ -1,27 +1,4 @@
 // script.js
-
-
-// --- Entity ID generator for realtime sync ---
-function generateEntityId(prefix='e') {
-  return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,8);
-}
-
-// Helper wrappers for Firebase (implemented in firebase-sync.js if enabled)
-window.firebaseCreateEntity = window.firebaseCreateEntity || function(entity){ /* no-op until firebase initialized */ };
-window.firebaseUpdateEntity = window.firebaseUpdateEntity || function(id, data){ /* no-op */ };
-window.firebaseDeleteEntity = window.firebaseDeleteEntity || function(id){ /* no-op */ };
-
-// Handlers for remote events (fired by firebase-sync.js)
-window.addEventListener('remoteEntityAdded', (e)=> {
-  // payload: { entity }
-  // if entity already exists locally, ignore. Firebase sync will push updates.
-});
-window.addEventListener('remoteEntityChanged', (e)=> {
-  // payload: { entity }
-});
-window.addEventListener('remoteEntityRemoved', (e)=> {
-  // payload: { id }
-});
 // ------------ Конфигурация ------------
 const MAP_COUNT = 25; // теперь map1..map25
 const MAP_FILE_PREFIX = "map"; // map1.jpg
@@ -479,18 +456,6 @@ function addSimpleSymbol(type, latlng) {
     draggable: true
   }).addTo(map);
 
-  // assign entity id for realtime sync
-  marker.entityId = generateEntityId('sym');
-  // expose minimal data for other code
-  marker.entityType = 'simple_symbol';
-  // push to firebase if available
-  try { window.firebaseCreateEntity && window.firebaseCreateEntity({
-    id: marker.entityId,
-    type: marker.entityType,
-    simpleType: type,
-    latlng: marker.getLatLng()
-  }); } catch(e){ console.warn('firebaseCreateEntity error', e); }
-
   // НЕ добавляем tooltip для простых символов
   marker._simpleType = type; // чтобы при сохранении/загрузке восстановить тип
 
@@ -709,15 +674,10 @@ function placeMarker(nick, nation, regimentFile, team, playerIndex){
 
   // не добавляем tooltip (как ты попросил удалить)
   marker.on('dragend', ()=> {
-    try{ window.firebaseUpdateEntity && window.firebaseUpdateEntity(marker.entityId, { latlng: marker.getLatLng() }); }catch(e){console.warn(e)}
+    // можно отлавливать новые координаты при необходимости
   });
 
-  
-  // assign entity id for this player marker
-  marker.entityId = id; // use generated id from generateMarkerId
-  marker.entityType = 'player_marker';
-  try{ window.firebaseCreateEntity && window.firebaseCreateEntity({ id: marker.entityId, type: marker.entityType, ownerNick: nick, team, playerIndex, latlng: marker.getLatLng() }); }catch(e){console.warn(e)}
-const entry = { id, team, playerIndex, nick, nation, regimentFile, marker };
+  const entry = { id, team, playerIndex, nick, nation, regimentFile, marker };
   markerList.push(entry);
 }
 
